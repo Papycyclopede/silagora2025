@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react'; // Ajout de useRef
 import {
   View,
   Text,
@@ -9,16 +9,16 @@ import {
   Alert,
   Modal,
   Linking,
-  Platform, // Import Platform for conditional paddingTop
-  Image, // Import Image
+  Platform,
+  Image,
 } from 'react-native';
 import { Globe, Volume2, Moon, MapPin, Shield, Bell, Archive, Info, RotateCcw, ChevronRight, X, LogOut, User, UserPlus, ShoppingBag, CircleHelp as HelpCircle } from 'lucide-react-native';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAuth } from '@/contexts/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
-import PurchaseModal from '../../components/PurchaseModal'; // Assurez-vous que le chemin est correct
-import { AVAILABLE_BACKGROUNDS, SouffleBackground } from '@/utils/backgrounds'; // Importez les backgrounds
+import PurchaseModal from '../../components/PurchaseModal';
+import { AVAILABLE_BACKGROUNDS, SouffleBackground } from '@/utils/backgrounds';
 
 interface SettingCardProps {
   icon: React.ReactNode;
@@ -34,7 +34,6 @@ function SettingCard({ icon, title, subtitle, children }: SettingCardProps) {
         <View style={styles.settingIcon}>{icon}</View>
         <View style={styles.settingTitleContainer}>
           <Text style={styles.settingTitle}>{title}</Text>
-          {/* Correction potentielle ici: assurer que subtitle est une chaîne simple */}
           <Text style={styles.settingSubtitle}>{subtitle}</Text> 
         </View>
       </View>
@@ -68,7 +67,6 @@ function CustomSlider({ value, onValueChange, minimumValue, maximumValue, step, 
       </View>
       <View style={styles.sliderButtons}>
         {[20, 50, 80, 100].map((val) => (
-          // Correction potentielle ici: pas d'espace ou de retour à la ligne direct entre les balises
           <TouchableOpacity
             key={val}
             style={[styles.sliderButton, value === val && styles.activeSliderButton]}
@@ -108,6 +106,12 @@ export default function SettingsScreen() {
   const [showSoundThemeModal, setShowSoundThemeModal] = useState(false);
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [showModerationInfo, setShowModerationInfo] = useState(false);
+
+  // Ref pour le compteur de taps pour l'accès développeur
+  const tapCount = useRef(0);
+  const lastTapTime = useRef(0);
+  const DEV_ACCESS_TAPS = 5; // Nombre de taps requis
+  const DEV_ACCESS_TIME_WINDOW = 2000; // Fenêtre de temps en ms pour les taps
 
   // Thèmes sonores disponibles
   const soundThemes = [
@@ -283,6 +287,25 @@ export default function SettingsScreen() {
     return lang?.native || t('settings.languageDefault');
   };
 
+  // Handler pour l'accès développeur secret
+  const handleVersionTextPress = () => {
+    const now = Date.now();
+    if (now - lastTapTime.current < DEV_ACCESS_TIME_WINDOW) {
+      tapCount.current += 1;
+      if (tapCount.current >= DEV_ACCESS_TAPS) {
+        tapCount.current = 0; // Réinitialise le compteur
+        Alert.alert(
+          "Accès Développeur",
+          "Vous avez débloqué l'accès développeur !",
+          [{ text: "OK", onPress: () => router.push('/(auth)/master-login') }]
+        );
+      }
+    } else {
+      tapCount.current = 1; // Premier tap d'une nouvelle série
+    }
+    lastTapTime.current = now;
+  };
+
   return (
     <View style={styles.container}>
       {/* Header de l'écran de paramètres */}
@@ -332,6 +355,7 @@ export default function SettingsScreen() {
                 {t('settings.anonymousText')}
               </Text>
               <View style={styles.anonymousFeatures}>
+                {/* Correction : Utilisez des éléments Text séparés pour chaque ligne de texte. */}
                 <Text>{t('settings.anonymousFeature1')}</Text>
                 <Text>{t('settings.anonymousFeature2')}</Text>
                 <Text>{t('settings.anonymousFeature3')}</Text>
@@ -613,7 +637,11 @@ export default function SettingsScreen() {
             <ChevronRight size={14} color="#8B7D6B" />
           </TouchableOpacity>
 
-          <Text style={styles.versionText}>{t('settings.version', { version: '1.0.0' })}</Text>
+          {/* MODIFICATION ICI : Ajout du onPress pour l'accès développeur */}
+          <TouchableOpacity onPress={handleVersionTextPress} style={styles.versionTouchable}>
+             <Text style={styles.versionText}>{t('settings.version', { version: '1.0.0' })}</Text>
+          </TouchableOpacity>
+         
         </SettingCard>
 
         {/* Bouton Réinitialiser les préférences */}
@@ -741,7 +769,6 @@ export default function SettingsScreen() {
               </Text>
 
               <Text style={styles.infoModalSubtitle}>{t('settings.howItWorksColon')}</Text>
-              {/* Correction: encapsuler chaque point dans un Text pour éviter les warnings */}
               <Text style={styles.infoModalText}>
                 <Text>{t('settings.moderationPoint1')}</Text>{'\n'}
                 <Text>{t('settings.moderationPoint2')}</Text>{'\n'}
@@ -750,7 +777,6 @@ export default function SettingsScreen() {
               </Text>
 
               <Text style={styles.infoModalSubtitle}>{t('settings.moderationCriteriaColon')}</Text>
-              {/* Correction: encapsuler chaque point dans un Text pour éviter les warnings */}
               <Text style={styles.infoModalText}>
                 <Text>{t('settings.criteriaPoint1')}</Text>{'\n'}
                 <Text>{t('settings.criteriaPoint2')}</Text>{'\n'}
@@ -793,7 +819,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 24,
     paddingVertical: 20,
-    paddingTop: Platform.OS === 'ios' ? 60 : 20, // Ajustement pour iOS safe area
+    paddingTop: Platform.OS === 'ios' ? 60 : 20,
     backgroundColor: 'rgba(249, 247, 244, 0.98)',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(139, 125, 107, 0.08)',
@@ -880,12 +906,7 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   anonymousFeatures: {
-    fontSize: 11, // Ces styles ne sont pas nécessaires si chaque ligne est un <Text> séparé
-    fontFamily: 'Georgia',
-    color: '#8B7D6B',
-    marginBottom: 16,
-    lineHeight: 16,
-    fontStyle: 'italic',
+    // Styles supprimés ici car les lignes sont maintenant des Text séparés
   },
   accountButtons: {
     gap: 10,
@@ -1162,6 +1183,11 @@ const styles = StyleSheet.create({
     fontFamily: 'Georgia',
     color: '#5D4E37',
     fontStyle: 'italic',
+  },
+  versionTouchable: { // Nouveau style pour l'TouchableOpacity autour du texte de version
+    paddingVertical: 8, // Augmente la zone de tap
+    alignSelf: 'center', // Centre le texte
+    // Pas de bordure ou de fond pour le rendre discret
   },
   versionText: {
     fontSize: 10,
