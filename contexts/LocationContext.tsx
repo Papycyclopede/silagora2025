@@ -23,21 +23,21 @@ interface LocationProviderProps {
 
 export function LocationProvider({ children }: LocationProviderProps) {
   const [location, setLocation] = useState<UserLocation | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(false); // Vrai quand on cherche activement une position ou une permission
   const [error, setError] = useState<string | null>(null);
   const [hasPermission, setHasPermission] = useState(false);
   const [permissionPermanentlyDenied, setPermissionPermanentlyDenied] = useState(false);
   const [watchSubscription, setWatchSubscription] = useState<Location.LocationSubscription | null>(null);
-  const [isLocationReady, setIsLocationReady] = useState(false); // Nouveau statut
+  const [isLocationReady, setIsLocationReady] = useState(false); // Vrai quand le contexte a fait son check initial
 
-  // Réf pour s'assurer que la demande initiale de permission ne se déclenche qu'une fois.
-  const initialPermissionCheckCompleted = useRef(false);
+  // Réf pour s'assurer que le check initial de permission ne se déclenche qu'une fois.
+  const initialCheckPerformed = useRef(false);
 
-  // 1. Vérifie la permission au premier montage et tente d'obtenir la position si permise.
+  // 1. Check la permission au premier montage et tente d'obtenir la position si permise.
   useEffect(() => {
-    const checkAndGetInitialLocation = async () => {
-      if (initialPermissionCheckCompleted.current) return; // S'assure que cela ne s'exécute qu'une seule fois
-      initialPermissionCheckCompleted.current = true;
+    const checkInitialLocationStatus = async () => {
+      if (initialCheckPerformed.current) return; // S'assure que cela ne s'exécute qu'une seule fois
+      initialCheckPerformed.current = true; // Marque le check comme effectué
 
       setLoading(true); // Indiquer le chargement dès le début de la vérification
 
@@ -45,11 +45,13 @@ export function LocationProvider({ children }: LocationProviderProps) {
         if (!navigator.geolocation) {
           setError('Géolocalisation non supportée par ce navigateur');
           setHasPermission(false);
-          setIsLocationReady(true);
+          setIsLocationReady(true); // Prêt pour le web même sans géoloc
           setLoading(false);
           return;
         }
 
+        // Pour le web, on demande la position (et donc la permission si elle n'est pas là)
+        // car il n'y a pas de pop-up Expo Go spécifique.
         navigator.geolocation.getCurrentPosition(
           (position) => {
             const newLocation = {
@@ -58,7 +60,7 @@ export function LocationProvider({ children }: LocationProviderProps) {
               accuracy: position.coords.accuracy,
             };
             setLocation(newLocation);
-            setHasPermission(true);
+            setHasPermission(true); // Supposons la permission accordée si la position est obtenue
             setError(null);
             setIsLocationReady(true);
             setLoading(false);
@@ -83,126 +85,111 @@ export function LocationProvider({ children }: LocationProviderProps) {
         return;
       }
 
-      // Logique Native (iOS/Android)
+      // Logique Native (iOS/Android) : SEULEMENT VÉRIFIER LE STATUT AU DÉMARRAGE
       try {
-        const { status, canAskAgain } = await Location.getForegroundPermissionsAsync();
+        const { status, canAskAgain } = await Location.getForegroundPermissionsAsync(); //
 
         if (status === 'granted') {
           setHasPermission(true);
           setPermissionPermanentlyDenied(false);
           setError(null);
 
-          // Tenter d'obtenir la position immédiatement si la permission est déjà accordée.
-          // Laisser le setLoading à true pendant cette acquisition.
+          // Si la permission est accordée, TENTER d'obtenir la position initiale.
           try {
             const currentLocation = await Location.getCurrentPositionAsync({
               accuracy: Location.Accuracy.High,
-              timeInterval: 1000, // Attendre max 1s pour une position
-              // Ne pas utiliser `maximumAge` si vous voulez toujours la position la plus fraîche pour l'initialisation.
+              timeInterval: 1000, // Attendre max 1s pour une position de bonne qualité
+              // maximumAge: 60000, // Peut être utilisé pour des positions plus anciennes si la fraîcheur n'est pas critique
             });
             const newLocation = { latitude: currentLocation.coords.latitude, longitude: currentLocation.coords.longitude, accuracy: currentLocation.coords.accuracy || undefined };
             setLocation(newLocation);
-            console.log('LocationContext: Position obtenue:', newLocation);
+            console.log('LocationContext: Position obtenue (initiale):', newLocation);
           } catch (posError: any) {
-            // Gérer les erreurs de positionnement même si la permission est accordée (ex: GPS désactivé)
-            if (posError.code === 'E_LOCATION_SETTINGS_UNSATISFIED') {
-                setError("Paramètres de localisation non satisfaits. Le GPS est peut-être désactivé.");
-                Alert.alert(
-                    "GPS Désactivé",
-                    "Veuillez activer le GPS de votre appareil pour utiliser toutes les fonctionnalités de l'application.",
-                    [{ text: "OK" }]
-                );
-            } else {
-                setError("Impossible d'obtenir la localisation initiale.");
-                console.error('LocationContext: Erreur lors de la position initiale:', posError);
-            }
-            setLocation(null); // S'assurer que la localisation est nulle en cas d'erreur
-          } finally {
-            setLoading(false); // Fin du chargement après la tentative d'acquisition de position
-            setIsLocationReady(true); // Le contexte est prêt à être utilisé
+            // La permission est là, mais pas la position (ex: GPS désactivé, pas de signal)
+            console.warn('LocationContext: Permission accordée mais impossible d\'obtenir la position initiale:', posError);
+            setError(posError.code === 'E_LOCATION_SETTINGS_UNSATISFIED' ? "GPS désactivé ou signal faible." : "Position initiale non obtenue.");
+            setLocation(null); // S'assurer que la localisation est nulle
           }
         } else {
-          // Permission non accordée (soit denied, soit undeterminded, soit limited)
+          // Permission non accordée (undetermined, denied, limited)
           setHasPermission(false);
-          setPermissionPermanentlyDenied(!canAskAgain); // Si canAskAgain est false, c'est permanent.
+          setPermissionPermanentlyDenied(!canAskAgain); // Déterminer si c'est refus permanent
           setError("Permission de géolocalisation non accordée.");
-          setLoading(false); // Fin du chargement
-          setIsLocationReady(true); // Le contexte est prêt à être utilisé, mais sans permission
+          setLocation(null); // S'assurer que la localisation est nulle
         }
       } catch (err) {
-        console.error('LocationContext: Erreur lors de la vérification de permission:', err);
-        setError("Erreur interne de permission de localisation.");
+        console.error('LocationContext: Erreur lors de la vérification initiale de permission:', err);
+        setError("Erreur interne lors de la vérification de localisation.");
         setHasPermission(false);
         setPermissionPermanentlyDenied(false);
-        setLoading(false); // Fin du chargement
-        setIsLocationReady(true); // Le contexte est prêt à être utilisé
+        setLocation(null);
+      } finally {
+        setLoading(false); // Le processus initial de check est terminé.
+        setIsLocationReady(true); // Le contexte est prêt à être utilisé (même si sans permission/position).
       }
     };
 
-    checkAndGetInitialLocation();
-  }, []); // Exécute une seule fois au montage.
+    checkInitialLocationStatus();
+  }, []); // S'exécute une seule fois au montage.
 
-  // Fonction pour demander la permission (utilisée par welcome.tsx ou le bouton de retry)
+  // Fonction pour DEMANDER LA PERMISSION (appelée par welcome.tsx ou un bouton de retry)
   const requestLocation = async () => {
     setLoading(true);
     setError(null);
     setPermissionPermanentlyDenied(false);
 
+    // Pas de changements majeurs ici, cette fonction est celle qui déclenche la pop-up
+    // et tente d'obtenir la position après.
     if (Platform.OS === 'web') {
-      // Logique spécifique au web inchangée, elle est déjà non bloquante ici.
-      if (!navigator.geolocation) {
-        setError('Géolocalisation non supportée par ce navigateur.');
-        setHasPermission(false);
-        setLoading(false);
-        return;
-      }
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const newLocation = {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-          };
-          setLocation(newLocation);
-          setHasPermission(true);
-          setError(null);
-          setLoading(false);
-        },
-        (geoError) => {
-          let errorMessage = "Impossible d'obtenir la localisation.";
-          let deniedPermanently = false;
-          if (geoError.code === geoError.PERMISSION_DENIED) {
-            errorMessage = 'Permission de géolocalisation refusée. Veuillez autoriser la géolocalisation dans votre navigateur.';
-            deniedPermanently = true;
-          }
-          setError(errorMessage);
+        // La logique web demande déjà la position et met à jour les états.
+        if (!navigator.geolocation) {
+          setError('Géolocalisation non supportée par ce navigateur.');
           setHasPermission(false);
-          setPermissionPermanentlyDenied(deniedPermanently);
           setLoading(false);
-        },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
-      );
-      return;
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            setLocation({ latitude: position.coords.latitude, longitude: position.coords.longitude, accuracy: position.coords.accuracy });
+            setHasPermission(true);
+            setError(null);
+            setLoading(false);
+          },
+          (geoError) => {
+            let errorMessage = "Impossible d'obtenir la localisation.";
+            let deniedPermanently = false;
+            if (geoError.code === geoError.PERMISSION_DENIED) {
+              errorMessage = 'Permission de géolocalisation refusée. Veuillez autoriser la géolocalisation dans votre navigateur.';
+              deniedPermanently = true;
+            }
+            setError(errorMessage);
+            setHasPermission(false);
+            setPermissionPermanentlyDenied(deniedPermanently);
+            setLoading(false);
+          },
+          { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+        );
+        return;
     }
 
     // Logique Native (iOS/Android)
     try {
-      const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+      const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync(); //
 
       if (status !== 'granted') {
         setError('Permission de géolocalisation refusée');
         setHasPermission(false);
         setPermissionPermanentlyDenied(!canAskAgain);
         
-        if (!canAskAgain) { // Si la permission est refusée de manière permanente, afficher une alerte claire.
+        if (!canAskAgain) {
           Alert.alert(
             "Permission requise",
             "Silagora a besoin d'accéder à votre position pour fonctionner. Veuillez l'activer manuellement dans les paramètres de votre appareil.",
-            [{ text: 'Compris', style: 'cancel' }]
+            [{ text: 'Compris' }]
           );
         }
         setLoading(false);
-        setLocation(null); // S'assurer que la localisation est nulle si la permission n'est pas accordée
+        setLocation(null); // Si la permission n'est pas accordée, la localisation est nulle.
         return;
       }
 
@@ -224,7 +211,6 @@ export function LocationProvider({ children }: LocationProviderProps) {
       setError(null);
       console.log('LocationContext: Position obtenue (demande explicite):', newLocation);
     } catch (err: any) {
-      // Gérer les erreurs spécifiques comme le GPS désactivé
       if (err.code === 'E_LOCATION_SETTINGS_UNSATISFIED') {
           setError("GPS désactivé. Veuillez l'activer dans les paramètres de votre appareil.");
           Alert.alert(
@@ -236,25 +222,27 @@ export function LocationProvider({ children }: LocationProviderProps) {
           setError("Impossible d'obtenir la localisation.");
           console.error('LocationContext: Erreur lors de la demande de géolocalisation:', err);
       }
-      setHasPermission(false); // La permission peut avoir été accordée, mais la position non obtenue.
-      setLocation(null); // S'assurer que la localisation est nulle en cas d'erreur
+      setHasPermission(false); 
+      setLocation(null); 
     } finally {
       setLoading(false);
     }
   };
 
+  // Les fonctions watchLocation et stopWatchingLocation restent inchangées.
   const watchLocation = async () => {
-    if (!hasPermission || permissionPermanentlyDenied) {
-      console.log("LocationContext: Ne peut pas démarrer le suivi. Permission non accordée ou refusée en permanence.");
-      stopWatchingLocation(); // S'assurer d'arrêter tout suivi si les conditions ne sont pas remplies
+    if (!hasPermission || permissionPermanentlyDenied || !location) { // Ajout de !location
+      console.log("LocationContext: Ne peut pas démarrer le suivi. Permission non accordée, refusée en permanence ou pas de position initiale.");
+      stopWatchingLocation();
       return;
     }
-    if (watchSubscription) { // Si déjà un abonnement, ne rien faire
+    if (watchSubscription) { 
       console.log("LocationContext: Suivi déjà actif.");
       return;
     }
 
-    stopWatchingLocation(); // Arrête tout abonnement précédent
+    // Arrête tout abonnement précédent avant d'en créer un nouveau.
+    stopWatchingLocation(); 
 
     if (Platform.OS === 'web') {
       if (!navigator.geolocation) return;
@@ -296,21 +284,19 @@ export function LocationProvider({ children }: LocationProviderProps) {
   };
 
   // Démarre le suivi quand la permission est accordée et qu'une première position est obtenue
-  // et que le `LocationProvider` est marqué comme prêt
   useEffect(() => {
     // Le suivi ne démarre que si:
-    // - La permission est accordée
-    // - Le contexte de localisation est initialement "prêt" (isLocationReady)
-    // - Une position a été obtenue (location n'est pas null)
-    // - Aucun abonnement de suivi n'est déjà actif
-    if (hasPermission && isLocationReady && location && !watchSubscription) {
+    // - La permission est accordée (`hasPermission`)
+    // - Une position a été obtenue (`location` n'est pas null)
+    // - Aucun abonnement de suivi n'est déjà actif (`!watchSubscription`)
+    // `isLocationReady` n'est plus une dépendance ici car il indique juste la fin du *check initial*.
+    if (hasPermission && location && !watchSubscription) {
       watchLocation();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPermission, isLocationReady, location, watchSubscription]);
+  }, [hasPermission, location, watchSubscription]);
 
   // `effectiveLoading` est à `true` si `loading` est `true` ET que la permission n'est pas refusée de manière permanente.
-  // Cela signifie que nous sommes activement en train de chercher la localisation ou la permission.
   // `isLocationReady` indique si le processus INITIAL de la localisation est terminé.
   const effectiveLoading = loading && !permissionPermanentlyDenied;
 
