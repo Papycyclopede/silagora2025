@@ -5,19 +5,24 @@ import React, { useEffect, useRef, useState } from 'react';
 import { router } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useAudio } from '@/contexts/AudioContext';
-import { useLocation } from '@/contexts/LocationContext'; // Importez isLocationReady
+import { useLocation } from '@/contexts/LocationContext';
 import { View, Text, StyleSheet, Animated, ImageBackground } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from '@react-native-async-storage/async-storage'; // Toujours importé pour d'autres usages dans l'app
 
-const HAS_LAUNCHED_KEY = '@silagora:has_launched';
+// HAS_LAUNCHED_KEY n'est PLUS utilisé ici pour la redirection initiale.
+// const HAS_LAUNCHED_KEY = '@silagora:has_launched';
 
 export default function AppInitializer() {
-  const { isLoading: isAuthLoading } = useAuth();
+  // MODIFIÉ: Ajout de isAuthenticated
+  const { isLoading: isAuthLoading, isAuthenticated } = useAuth();
+  // isSoundLoading et initAudio sont toujours là mais ne seront pas appelés si l'audio est "désactivé pour le moment"
   const { isSoundLoading, initAudio, settings: audioSettings } = useAudio();
-  const { loading: locationLoading, hasPermission: hasLocationPermission, isLocationReady } = useLocation(); // MODIFIÉ: Ajout de isLocationReady
+  // MODIFIÉ: Ajout de isLocationReady
+  const { loading: locationLoading, hasPermission: hasLocationPermission, isLocationReady } = useLocation();
 
-  const [hasCheckedFirstLaunch, setHasCheckedFirstLaunch] = useState(false);
-  const [isFirstLaunch, setIsFirstLaunch] = useState(false);
+  // hasCheckedFirstLaunch et isFirstLaunch sont PLUS utilisés pour le démarrage initial.
+  // const [hasCheckedFirstLaunch, setHasCheckedFirstLaunch] = useState(false);
+  // const [isFirstLaunch, setIsFirstLaunch] = useState(false);
   const [initializationStatus, setInitializationStatus] = useState("Démarrage...");
 
   const dot1Opacity = useRef(new Animated.Value(0.3)).current;
@@ -44,77 +49,42 @@ export default function AppInitializer() {
   }, []);
 
   useEffect(() => {
-    const checkFirstLaunchAndRedirect = async () => {
-      // Étape 1: Vérifier si c'est le premier lancement (si non déjà fait)
-      if (!hasCheckedFirstLaunch) {
-        try {
-          const hasLaunched = await AsyncStorage.getItem(HAS_LAUNCHED_KEY);
-          if (hasLaunched === null) {
-            setIsFirstLaunch(true);
-            await AsyncStorage.setItem(HAS_LAUNCHED_KEY, 'true');
-            console.log("Premier lancement détecté. HAS_LAUNCHED_KEY a été défini.");
-          } else {
-            setIsFirstLaunch(false);
-            console.log("Ce n'est pas le premier lancement.");
-          }
-        } catch (e) {
-          console.error("Failed to check first launch status or set key:", e);
-          setIsFirstLaunch(false);
-        } finally {
-          setHasCheckedFirstLaunch(true); // Marquer que la vérification initiale est terminée
-        }
-        return; // Attendre le prochain cycle de rendu avec hasCheckedFirstLaunch mis à jour
-      }
+    const initializeAndRedirect = async () => {
+      setInitializationStatus("Vérification des ressources...");
 
-      // Étape 2: Redirection basée sur isFirstLaunch et l'état des ressources
-      if (isFirstLaunch) {
-        setInitializationStatus("Préparation de l'expérience initiale...");
-        console.log("Redirection vers /welcome (premier lancement)...");
-        router.replace('/(auth)/welcome');
-        return;
-      }
-
-      // Si ce n'est PAS le premier lancement, initialiser et rediriger vers la carte
-
-      setInitializationStatus("Vérification de l'authentification...");
+      // Attendre que l'authentification soit chargée.
       if (isAuthLoading) {
-        // Attendre que l'authentification soit chargée. Ne pas avancer tant que ce n'est pas fait.
+        console.log("Initialisation: En attente de l'Auth...");
         return;
       }
 
-      setInitializationStatus("Vérification des permissions de localisation...");
-      // MODIFIÉ: Attendre que `isLocationReady` soit vrai, peu importe si la permission est granted ou denied.
-      if (!isLocationReady) { //
+      // Attendre que le contexte de localisation ait fini son check initial.
+      if (!isLocationReady) {
+        console.log("Initialisation: En attente de la Localisation (isLocationReady)...");
         return;
       }
       
-      setInitializationStatus("Initialisation de l'audio (désactivée pour le moment)...");
-      // L'audio est désactivé pour le moment. Nous n'appelons pas initAudio() et considérons
-      // qu'il est prêt (`isAudioConsideredReady = true`) pour ne pas bloquer.
+      // L'audio est désactivé pour le moment. Nous le considérons prêt.
       const isAudioConsideredReady = true;
 
       // Une fois toutes les ressources chargées ou considérées comme prêtes
-      if (!isAuthLoading && isAudioConsideredReady && isLocationReady) { // MODIFIÉ: Utilise isLocationReady
-        console.log("Initialisation complète. Navigation vers /tabs...");
-        setInitializationStatus("Prêt pour l'envol !");
-        router.replace('/(tabs)');
+      if (!isAuthLoading && isAudioConsideredReady && isLocationReady) {
+        if (isAuthenticated) {
+          console.log("Initialisation complète. Utilisateur authentifié. Redirection vers /tabs...");
+          setInitializationStatus("Prêt pour l'envol !");
+          router.replace('/(tabs)');
+        } else {
+          console.log("Initialisation complète. Utilisateur non authentifié. Redirection vers /welcome...");
+          setInitializationStatus("Prêt pour l'envol !");
+          router.replace('/(auth)/welcome');
+        }
       } else {
-        console.log(`Statuts de chargement: Auth=${!isAuthLoading}, Audio=${isAudioConsideredReady}, LocationReady=${isLocationReady}, LocPerm=${hasLocationPermission}`);
+        console.log(`Statuts de chargement finaux (avant redirection): Auth=${!isAuthLoading}, Audio=${isAudioConsideredReady}, LocationReady=${isLocationReady}`);
       }
     };
 
-    checkFirstLaunchAndRedirect();
-  }, [
-    hasCheckedFirstLaunch, 
-    isFirstLaunch, 
-    isAuthLoading, 
-    isSoundLoading, 
-    locationLoading, 
-    hasLocationPermission, 
-    isLocationReady, // NOUVELLE DÉPENDANCE CLÉ
-    audioSettings.enabled, 
-    initAudio 
-  ]);
+    initializeAndRedirect();
+  }, [isAuthLoading, isAuthenticated, isLocationReady, isSoundLoading, locationLoading, hasLocationPermission, audioSettings.enabled, initAudio]);
 
 
   return (
