@@ -11,6 +11,7 @@ import {
   ImageBackground,
   Dimensions,
   ActivityIndicator,
+  Animated, // Import Animated for custom animations
 } from 'react-native';
 import { Eye, Gift, X } from 'lucide-react-native';
 
@@ -60,9 +61,9 @@ export interface MapViewActions {
   zoomIn: () => void;
   zoomOut: () => void;
   toggleMapType: () => void;
-  toggleSimulation: () => void;
-  toggleTrails: () => void;
-  regenerateSimulation: () => void;
+  toggleSimulation: () => void; // À implémenter dans MapView
+  toggleTrails: () => void; // À implémenter dans MapView
+  regenerateSimulation: () => void; // À implémenter dans MapView
 }
 
 const MIN_ZOOM = 8;
@@ -70,33 +71,40 @@ const MAX_ZOOM = 20;
 const DEFAULT_ZOOM = 16;
 const calculateDelta = (zoom: number) => Math.max(0.001, 360 / Math.pow(2, zoom));
 
-// --- Clusters ---
+// --- Composants de marqueurs optimisés ---
 
-const SouffleCluster = ({ cluster, onPress }: { cluster: any; onPress: (clusterId: string, children: any[]) => void }) => (
+// Composant pour les clusters (groupements de souffles)
+const SouffleCluster = React.memo(({ cluster, onPress }: { cluster: any; onPress: (clusterId: string, children: any[]) => void }) => (
   <Marker
     key={`cluster-${cluster.id}`}
     coordinate={cluster.geometry.coordinates}
     onPress={() => onPress(cluster.id, cluster.properties.cluster_children)}
+    // tracksViewChanges={false} // Les marqueurs de cluster peuvent changer, donc tracksViewChanges pourrait être nécessaire
   >
     <View style={styles.clusterMarker}>
       <Text style={styles.clusterCount}>{cluster.properties.point_count}</Text>
       <Text style={styles.clusterLabel}>souffles</Text>
     </View>
   </Marker>
-);
+));
 
+// Composant pour les marqueurs de souffle individuels
 const MemoizedSouffleMarker = React.memo(({ souffle, location, onPress }: { souffle: Souffle; location: any; onPress: (souffle: Souffle) => void }) => {
   const canReveal = isWithinRevealDistance(location.latitude, location.longitude, souffle.latitude, souffle.longitude);
   const sticker = souffle.sticker ? getStickerById(souffle.sticker) : null;
   const background = getBackgroundById(souffle.backgroundId);
   const isSquare = background?.shape === 'square';
 
+  // Utilisation d'Animated.ImageBackground pour les backgrounds si vous voulez animer le background lui-même
+  // Ou juste Animated.View si l'image est statique mais le conteneur animé.
+  // Pour l'optimisation des images, il est crucial qu'elles soient pré-optimisées en taille et résolution.
   return (
-    <Marker identifier={souffle.id} coordinate={souffle} onPress={() => onPress(souffle)}>
+    <Marker identifier={souffle.id} coordinate={souffle} onPress={() => onPress(souffle)} tracksViewChanges={false}>
       <AnimatedHalo isActive={canReveal} canReveal={canReveal && !souffle.isRevealed} isRevealed={souffle.isRevealed}>
         <WaveEffect isActive={canReveal && !souffle.isRevealed}>
           <ImageBackground
             source={background.source}
+            // Utiliser un style conditionnel pour éviter les bugs de borderRadius sur ImageBackground
             style={[
               styles.souffleMarkerBase,
               isSquare ? styles.souffleMarkerSquare : styles.souffleMarkerCircle,
@@ -119,11 +127,27 @@ const MemoizedSouffleMarker = React.memo(({ souffle, location, onPress }: { souf
   );
 });
 
-// --- Composant Principal ---
+// Composant pour les marqueurs de tickets suspendus
+const MemoizedTicketMarker = React.memo(({ ticket, location, onPress }: { ticket: SuspendedTicket; location: any; onPress: (ticket: SuspendedTicket) => void }) => {
+  const canReveal = isWithinRevealDistance(location.latitude, location.longitude, ticket.latitude, ticket.longitude);
+
+  return (
+    <Marker key={ticket.id} coordinate={ticket} tracksViewChanges={false}>
+      <AnimatedHalo isActive={true} canReveal={canReveal}>
+        <TouchableOpacity style={styles.ticketMarker} onPress={() => onPress(ticket)}>
+          <Gift size={20} color="#C17B5C" />
+        </TouchableOpacity>
+      </AnimatedHalo>
+    </Marker>
+  );
+});
+
+
+// --- Composant Principal OptimizedMapView ---
 const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mode, onSouffleRevealed }, ref) => {
   const { location, loading: locationLoading } = useLocation();
   const { souffles, revealSouffle, suspendedTickets, claimSuspendedTicket } = useSouffle();
-  const { t } = useLanguage();
+  const { t } = useLanguage(); 
   const { playInteractionSound } = useAudio();
   const { user, spendTicket, isAuthenticated } = useAuth();
   
@@ -132,107 +156,172 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
   const [mapType, setMapType] = useState<'standard' | 'satellite' | 'hybrid'>('standard');
   const internalMapRef = useRef<MapViewType | null>(null);
 
+  // Expose les méthodes via ref pour le parent (index.tsx)
   useImperativeHandle(ref, () => ({
     locateMe: () => handleMapAction(DEFAULT_ZOOM),
     zoomIn: () => handleMapAction(zoomLevel + 1),
     zoomOut: () => handleMapAction(zoomLevel - 1),
-    toggleMapType: () => setMapType(current => (current === 'standard' ? 'satellite' : 'standard')),
-    toggleSimulation: () => { /* Simulation logic */ },
-    toggleTrails: () => { /* Trails logic */ },
-    regenerateSimulation: () => { /* Regeneration logic */ },
+    toggleMapType: () => setMapType(current => (current === 'standard' ? 'satellite' : current === 'satellite' ? 'hybrid' : 'standard')), // Ajout de 'hybrid'
+    toggleSimulation: () => console.log('Toggle Simulation called'), // Placeholder, à implémenter
+    toggleTrails: () => console.log('Toggle Trails called'), // Placeholder, à implémenter
+    regenerateSimulation: () => console.log('Regenerate Simulation called'), // Placeholder, à implémenter
   }));
 
-  const handleMapAction = (newZoom: number) => {
+  // Anime la carte à une nouvelle région/zoom
+  const handleMapAction = useCallback((newZoom: number) => {
     if (internalMapRef.current && location) {
       const clampedZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
       setZoomLevel(clampedZoom);
       const delta = calculateDelta(clampedZoom);
       internalMapRef.current.animateToRegion({ latitude: location.latitude, longitude: location.longitude, latitudeDelta: delta, longitudeDelta: delta }, 500);
     }
-  };
+  }, [location, zoomLevel]); // Ajout de zoomLevel aux dépendances pour s'assurer que sa valeur est à jour.
 
+  // Gère le clic sur un cluster
   const handleClusterPress = useCallback((clusterId: string, children: any[]) => {
-    if (!internalMapRef.current || !children) return;
-    internalMapRef.current.fitToElements({
-        edgePadding: { top: 150, right: 100, bottom: 150, left: 100 },
-        animated: true,
-    });
+    if (!internalMapRef.current || !children || children.length === 0) return;
+
+    // Si un cluster est pressé, on zoome sur les marqueurs qu'il contient
+    const coordinates = children.map(child => child.geometry.coordinates);
+    if (coordinates.length > 0) {
+      internalMapRef.current.fitToSuppliedMarkers(
+        coordinates.map((coord: { latitude: number, longitude: number }) => `souffle-${coord.latitude}-${coord.longitude}`), // Utiliser des identifiants uniques
+        { edgePadding: { top: 150, right: 100, bottom: 150, left: 100 }, animated: true }
+      );
+    }
   }, []);
   
+  // Gère le clic sur un marqueur de souffle
   const handleMarkerPress = useCallback(async (souffle: Souffle) => {
     if (mode !== 'read' || !location) return;
     playInteractionSound('navigate');
+    
     if (souffle.isRevealed) {
       setSelectedSouffle(souffle);
       return;
     }
+
     const canReveal = isWithinRevealDistance(location.latitude, location.longitude, souffle.latitude, souffle.longitude);
+    
     if (canReveal) {
+      // Révélation directe
       await revealSouffle(souffle.id);
-      onSouffleRevealed?.(souffle);
-      setSelectedSouffle({ ...souffle, isRevealed: true });
+      onSouffleRevealed?.(souffle); // Notifie le parent (index.tsx)
+      setSelectedSouffle({ ...souffle, isRevealed: true }); // Met à jour le souffle pour l'affichage de la modale
     } else {
-      if (!user) {
+      // Révélation à distance avec ticket
+      if (!isAuthenticated) {
         Alert.alert(t('common.functionalityReserved'), t('common.accountRequiredForDistantReveal'));
         return;
       }
+      
       const distance = Math.round(calculateDistance(location.latitude, location.longitude, souffle.latitude, souffle.longitude));
-      const ticketCount = user.ticketCount || 0;
-      Alert.alert(t('common.tooFarToRevealTitle'), t('common.tooFarToRevealMessage', { distance, ticketCount }),
-        [{ text: t('common.cancel'), style: 'cancel' }, { text: t('common.useOneTicket'), onPress: async () => {
+      const ticketCount = user?.ticketCount || 0; // Utiliser optional chaining pour user
+
+      Alert.alert(
+        t('common.tooFarToRevealTitle'),
+        t('common.tooFarToRevealMessage', { distance, ticketCount }),
+        [
+          { text: t('common.cancel'), style: 'cancel' },
+          { 
+            text: t('common.useOneTicket'), 
+            onPress: async () => {
               if (ticketCount > 0) {
-                  const ticketSpent = await spendTicket();
-                  if (ticketSpent) {
-                    await revealSouffle(souffle.id);
-                    onSouffleRevealed?.(souffle);
-                    setSelectedSouffle({ ...souffle, isRevealed: true });
-                    Alert.alert(t('common.souffleRevealed'), t('common.ticketsRemaining', { count: (user.ticketCount || 0) - 1 }));
-                  }
+                const ticketSpent = await spendTicket();
+                if (ticketSpent) {
+                  await revealSouffle(souffle.id);
+                  onSouffleRevealed?.(souffle);
+                  setSelectedSouffle({ ...souffle, isRevealed: true });
+                  Alert.alert(
+                    t('common.souffleRevealed'),
+                    t('common.ticketsRemaining', { count: (user?.ticketCount || 1) - 1 })
+                  );
+                }
               } else {
-                  Alert.alert(t('common.ticketsExhausted'), t('common.visitShopForMoreTickets'));
+                Alert.alert(t('common.ticketsExhausted'), t('common.visitShopForMoreTickets'));
               }
-            }, style: 'default' }]
+            }, 
+            style: 'default' 
+          }
+        ]
       );
     }
-  }, [mode, location, user, t, revealSouffle, onSouffleRevealed, spendTicket, playInteractionSound]);
+  }, [mode, location, isAuthenticated, user, t, revealSouffle, onSouffleRevealed, spendTicket, playInteractionSound]);
 
-  const handleTicketPress = async (ticket: SuspendedTicket) => {
-    if (!location || !isAuthenticated) return;
-    // ... Logique à compléter
-  };
+  // Gère le clic sur un marqueur de ticket suspendu
+  const handleTicketPress = useCallback(async (ticket: SuspendedTicket) => {
+    if (!location || !isAuthenticated) {
+      Alert.alert(t('common.functionalityReserved'), t('shop.item_alert_account_required_text'));
+      return;
+    }
+
+    Alert.alert(
+      t('shop.items.suspended_ticket.name'),
+      t('shop.items.suspended_ticket.benefit1'), // Utiliser la description du bénéfice
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('shop.item_button_offer', { price: '0,99 €' }), // Ou un texte plus approprié comme "Réclamer"
+          onPress: async () => {
+            const claimed = await claimSuspendedTicket(ticket.id);
+            if (claimed) {
+              Alert.alert(t('shop.item_alert_thanks_title'), t('shop.item_alert_thanks_text'));
+            } else {
+              Alert.alert(t('error'), t('shop.item_alert_error_text'));
+            }
+          },
+        },
+      ]
+    );
+  }, [location, isAuthenticated, claimSuspendedTicket, t]);
   
-  const getTimeAgo = (date: Date): string => { 
+  // Fonction utilitaire pour le temps écoulé
+  const getTimeAgo = useCallback((date: Date): string => { 
     const diff = Date.now() - new Date(date).getTime(); 
     const minutes = Math.floor(diff / 60000); 
     if (minutes < 1) return t("justNow");
     if (minutes < 60) return t("minutesAgo", { count: minutes });
     const hours = Math.floor(minutes / 60); 
     return t("hoursAgo", { count: hours });
-  };
+  }, [t]);
   
+  // Prépare les données pour la modale du souffle révélé
   const modalBackground = selectedSouffle ? getBackgroundById(selectedSouffle.backgroundId) : null;
   const showPremiumModal = modalBackground?.source && modalBackground?.shape === 'square';
 
-  const renderModalContent = () => {
+  // Rendu du contenu de la modale de souffle révélé
+  const renderModalContent = useCallback(() => {
     const isPremium = !!(showPremiumModal && modalBackground?.source);
     return (
-      <View style={[ styles.modalTextContainer, isPremium ? styles.modalTextContainerPremium : undefined ]}>
+      <View style={[
+        styles.modalTextContainer,
+        isPremium ? styles.modalTextContainerPremium : undefined
+      ]}>
         <TouchableOpacity style={styles.closeButton} onPress={() => setSelectedSouffle(null)}>
           <X size={18} color="#8B7D6B" />
         </TouchableOpacity>
         {selectedSouffle && (
           <ScrollView showsVerticalScrollIndicator={false}>
-            <Text style={[ styles.modalTitle, isPremium ? styles.modalTitlePremium : undefined ]}>
+            <Text style={[
+              styles.modalTitle,
+              isPremium ? styles.modalTitlePremium : undefined
+            ]}>
               {t('souffleRevealed')}
             </Text>
             {selectedSouffle.content.jeMeSens && (
               <View style={styles.modalEmotionContainer}>
-                <Text style={[ styles.modalEmotionText, isPremium ? styles.modalEmotionTextPremium : undefined ]}>
+                <Text style={[
+                  styles.modalEmotionText,
+                  isPremium ? styles.modalEmotionTextPremium : undefined
+                ]}>
                   {getEmotionDisplay(selectedSouffle.content.jeMeSens)?.emoji} {t(`emotions.${selectedSouffle.content.jeMeSens}`)}
                 </Text>
               </View>
             )}
-            <Text style={[ styles.modalText, isPremium ? styles.modalTextPremium : undefined ]}>
+            <Text style={[
+              styles.modalText,
+              isPremium ? styles.modalTextPremium : undefined
+            ]}>
               {selectedSouffle.content.messageLibre}
             </Text>
             {selectedSouffle.sticker && (
@@ -240,15 +329,19 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
                 {getStickerById(selectedSouffle.sticker)?.emoji}
               </Text>
             )}
-            <Text style={[ styles.modalTime, isPremium ? styles.modalTimePremium : undefined ]}>
+            <Text style={[
+              styles.modalTime,
+              isPremium ? styles.modalTimePremium : undefined
+            ]}>
               {getTimeAgo(selectedSouffle.createdAt)}
             </Text>
           </ScrollView>
         )}
       </View>
     );
-  };
+  }, [selectedSouffle, showPremiumModal, modalBackground, getTimeAgo, t]); // Dépendances pour useCallback
 
+  // Affichage si la carte n'est pas disponible (web ou localisation manquante)
   if (!location || Platform.OS === 'web') {
     return (
       <View style={styles.mapUnavailableOverlay}>
@@ -272,9 +365,11 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
         clusteringEnabled={true}
         renderCluster={(cluster: any) => <SouffleCluster cluster={cluster} onPress={handleClusterPress} />}
       >
+        {/* Cercles de portée autour de l'utilisateur */}
         <Circle center={location} radius={500} strokeColor="rgba(139, 125, 107, 0.3)" fillColor="rgba(139, 125, 107, 0.05)" strokeWidth={1} />
         <Circle center={location} radius={15} strokeColor="rgba(168, 200, 225, 0.8)" fillColor="rgba(168, 200, 225, 0.2)" strokeWidth={1} />
 
+        {/* Rendu des marqueurs de souffles (optimisé) */}
         {souffles.map((souffle) => (
           <MemoizedSouffleMarker
             key={souffle.id}
@@ -284,17 +379,18 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
           />
         ))}
 
+        {/* Rendu des marqueurs de tickets suspendus (optimisé) */}
         {suspendedTickets.map((ticket) => (
-          <Marker key={ticket.id} coordinate={ticket} tracksViewChanges={false}>
-            <AnimatedHalo isActive={true} canReveal={isWithinRevealDistance(location.latitude, location.longitude, ticket.latitude, ticket.longitude)}>
-              <TouchableOpacity style={styles.ticketMarker} onPress={() => handleTicketPress(ticket)}>
-                <Gift size={20} color="#C17B5C" />
-              </TouchableOpacity>
-            </AnimatedHalo>
-          </Marker>
+          <MemoizedTicketMarker
+            key={ticket.id}
+            ticket={ticket}
+            location={location}
+            onPress={handleTicketPress}
+          />
         ))}
       </MapView>
 
+      {/* Modale de révélation de souffle */}
       <Modal visible={!!selectedSouffle} transparent animationType="fade" onRequestClose={() => setSelectedSouffle(null)}>
         <TouchableOpacity 
           style={styles.modalOverlaySouffle}
@@ -302,6 +398,8 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
           onPress={() => setSelectedSouffle(null)}
         >
           {showPremiumModal && modalBackground?.source ? (
+              // Utilisation d'un composant Animated.ImageBackground si vous voulez animer l'arrière-plan de la modale
+              // Pour des performances optimales, assurez-vous que les images source sont légères.
               <ImageBackground source={modalBackground.source} style={[styles.modalContentBaseSouffle, styles.modalContentSquareSouffle]} imageStyle={{ borderRadius: 25 }}>
                   {renderModalContent()}
               </ImageBackground>
@@ -353,7 +451,7 @@ const styles = StyleSheet.create({
   souffleMarkerCircle: { borderRadius: 19 },
   souffleMarkerSquare: { borderRadius: 8 },
   souffleMarkerRevealed: { borderColor: '#F4E4BC' },
-  souffleMarkerCanReveal: { width: 48, height: 48 },
+  souffleMarkerCanReveal: { width: 48, height: 48 }, // Agrandit le marqueur quand il est révélable
   souffleMarkerHidden: { backgroundColor: 'rgba(184, 160, 130, 0.7)' },
   markerContentContainer: { flex: 1, width: '100%', height: '100%', justifyContent: 'center', alignItems: 'center' },
   souffleMarkerEmoji: { fontSize: 18, textShadowColor: 'rgba(0, 0, 0, 0.2)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 1 },
