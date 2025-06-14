@@ -18,25 +18,23 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
-// Clés AsyncStorage pour les choix de l'utilisateur
-const HAS_SEEN_PERMISSIONS_SCREEN = '@silagora:has_seen_permissions_screen';
-const USER_AUDIO_PREFERENCE = '@silagora:user_audio_preference'; // 'enabled' | 'disabled' | null
-const USER_LOCATION_PREFERENCE = '@silagora:user_location_preference'; // 'granted' | 'denied' | null
+const HAS_SEEN_PERMISSIONS_SCREEN = '@silagora:has_seen_permissions_screen'; //
+const USER_AUDIO_PREFERENCE = '@silagora:user_audio_preference'; //
+const USER_LOCATION_PREFERENCE = '@silagora:user_location_preference'; //
 
 export default function WelcomeScreen() {
   const { t } = useLanguage();
-  const { requestLocation, hasPermission: hasLocationPermission, error: locationError } = useLocation();
-  const { initAudio, settings: audioSettings, updateSettings } = useAudio();
+  const { requestLocation, hasPermission: hasLocationPermission, error: locationError } = useLocation(); //
+  const { updateSettings } = useAudio(); //
 
-  const [showLocationModal, setShowLocationModal] = useState(false);
-  // const [showAudioModal, setShowAudioModal] = useState(false); // Supprimé : plus besoin de cette modale
-  const [hasCheckedPreferences, setHasCheckedPreferences] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false); //
+  const [hasCheckedPreferences, setHasCheckedPreferences] = useState(false); //
 
   useEffect(() => {
     const checkUserPreferences = async () => {
-      const seenPermissionsScreen = await AsyncStorage.getItem(HAS_SEEN_PERMISSIONS_SCREEN);
+      const seenPermissionsScreen = await AsyncStorage.getItem(HAS_SEEN_PERMISSIONS_SCREEN); //
       if (seenPermissionsScreen === 'true') {
-        router.replace('/(tabs)');
+        router.replace('/(tabs)'); //
         return;
       }
       
@@ -47,49 +45,35 @@ export default function WelcomeScreen() {
     checkUserPreferences();
   }, []);
 
-  // --- Fonctions de gestion des permissions ---
-
   const handleLocationChoice = async (choice: 'activate' | 'later') => {
-    setShowLocationModal(false);
+    setShowLocationModal(false); // Ferme la modale de localisation immédiatement
 
     if (choice === 'activate') {
-      await requestLocation();
-      await AsyncStorage.setItem(USER_LOCATION_PREFERENCE, hasLocationPermission ? 'granted' : 'denied');
-      if (hasLocationPermission) {
-        Alert.alert(t('welcome.locationSuccessTitle'), t('welcome.locationSuccessMessage'));
-      } else {
-        Alert.alert(t('welcome.locationDeniedTitle'), t('welcome.locationDeniedMessage'));
-      }
+      // IMPORTANT: NE PAS AWAIT ICI pour éviter de bloquer l'UI si la pop-up Expo est lente.
+      // La promesse sera résolue en arrière-plan dans LocationContext.
+      requestLocation(); // Déclenche la demande de permission et acquisition de position
+
+      await AsyncStorage.setItem(USER_LOCATION_PREFERENCE, choice === 'activate' ? 'granted' : 'denied'); //
     } else {
-      await AsyncStorage.setItem(USER_LOCATION_PREFERENCE, 'denied');
+      await AsyncStorage.setItem(USER_LOCATION_PREFERENCE, 'denied'); //
     }
 
-    // Après le choix de localisation, on passe directement à la fin du flux sans modale audio
-    handleAudioChoice('continueWithout'); // Appelle directement la fonction pour "ignorer" l'audio
+    handleAudioChoice(); // Continue le flux d'initialisation
   };
 
-  const handleAudioChoice = async (choice: 'activate' | 'continueWithout') => {
-    // setShowAudioModal(false); // Supprimé : plus besoin de cacher la modale
+  const handleAudioChoice = async () => {
+    await updateSettings({ enabled: false, contextualSounds: false, spatialAudio: false }); //
+    await AsyncStorage.setItem(USER_AUDIO_PREFERENCE, 'disabled'); //
 
-    // Puisque l'audio est désactivé pour le moment, on met à jour les settings pour le désactiver
-    // et on marque la préférence de l'utilisateur comme "désactivée" même si c'était "activer".
-    await updateSettings({ enabled: false, contextualSounds: false, spatialAudio: false });
-    await AsyncStorage.setItem(USER_AUDIO_PREFERENCE, 'disabled');
-    // On ne montre plus d'alerte pour l'audio ici pour simplifier le flux de première utilisation.
-    // Alert.alert(t('welcome.audioDeniedTitle'), t('welcome.audioDeniedMessage'));
-
-    // Marque que l'utilisateur a vu l'écran des permissions
-    await AsyncStorage.setItem(HAS_SEEN_PERMISSIONS_SCREEN, 'true');
-    // Une fois les choix faits, on redirige vers l'écran de création de compte ou de login
-    router.replace('/(auth)/create-account');
+    await AsyncStorage.setItem(HAS_SEEN_PERMISSIONS_SCREEN, 'true'); //
+    router.replace('/(auth)/create-account'); // Redirige toujours vers l'écran de création de compte
   };
 
-  // Si les préférences n'ont pas encore été vérifiées, ne rien afficher pour éviter un flash
-  if (!hasCheckedPreferences) {
+  if (!hasCheckedPreferences) { //
     return null;
   }
 
-  const features = [
+  const features = [ //
     {
       icon: <Wind size={24} color="#8B7355" />,
       title: t('welcome.feature1.title'),
@@ -223,28 +207,6 @@ export default function WelcomeScreen() {
           </View>
         </View>
       </Modal>
-
-      {/* Supprimé : Modal pour la demande audio */}
-      {/* <Modal
-        visible={showAudioModal}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => handleAudioChoice('continueWithout')}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Volume2 size={32} color="#8B7355" style={styles.modalIcon} />
-            <Text style={styles.modalTitle}>{t('welcome.audioModalTitle')}</Text>
-            <Text style={styles.modalText}>{t('welcome.audioModalText')}</Text>
-            <TouchableOpacity style={styles.modalButton} onPress={() => handleAudioChoice('activate')}>
-              <Text style={styles.modalButtonText}>{t('welcome.audioModalButton')}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.modalSkipButton} onPress={() => handleAudioChoice('continueWithout')}>
-              <Text style={styles.modalSkipButtonText}>{t('welcome.audioModalSkip')}</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal> */}
 
     </View>
   );
