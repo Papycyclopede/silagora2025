@@ -8,10 +8,11 @@ import {
   Alert,
   Modal,
   ScrollView,
-  ImageBackground, // Utilisé pour les fonds de souffle
+  ImageBackground,
   Dimensions,
   ActivityIndicator,
   Animated, // Import Animated for custom animations
+  // Image // Importez Image si vous voulez précharger des images manuellement.
 } from 'react-native';
 import { Eye, Gift, X } from 'lucide-react-native';
 
@@ -41,12 +42,12 @@ import { useSouffle } from '@/contexts/SouffleContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useAudio } from '@/contexts/AudioContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { isWithinRevealDistance, calculateDistance } from '@/utils/distance'; //
-import { getStickerById } from '@/utils/stickers'; //
-import { getBackgroundById } from '@/utils/backgrounds'; //
-import { getEmotionDisplay } from '@/utils/emotionUtils'; //
-import { AnimatedHalo, WaveEffect, FloatingParticle } from './MapAnimations'; //
-import type { Souffle, SuspendedTicket } from '@/types/souffle'; //
+import { isWithinRevealDistance, calculateDistance } from '@/utils/distance';
+import { getStickerById } from '@/utils/stickers';
+import { getBackgroundById } from '@/utils/backgrounds';
+import { getEmotionDisplay } from '@/utils/emotionUtils';
+import { AnimatedHalo, WaveEffect, FloatingParticle } from './MapAnimations';
+import type { Souffle, SuspendedTicket } from '@/types/souffle';
 
 const { width } = Dimensions.get('window');
 
@@ -61,9 +62,9 @@ export interface MapViewActions {
   zoomIn: () => void;
   zoomOut: () => void;
   toggleMapType: () => void;
-  toggleSimulation: () => void; // À implémenter dans MapView
-  toggleTrails: () => void; // À implémenter dans MapView
-  regenerateSimulation: () => void; // À implémenter dans MapView
+  toggleSimulation: () => void; 
+  toggleTrails: () => void; 
+  regenerateSimulation: () => void; 
 }
 
 const MIN_ZOOM = 8;
@@ -79,8 +80,6 @@ const SouffleCluster = React.memo(({ cluster, onPress }: { cluster: any; onPress
     key={`cluster-${cluster.id}`}
     coordinate={cluster.geometry.coordinates}
     onPress={() => onPress(cluster.id, cluster.properties.cluster_children)}
-    // tracksViewChanges={false} pourrait être utilisé ici si le cluster ne change pas d'apparence
-    // Par défaut, le rendu du cluster peut varier (nombre, taille), donc le laisser à true est souvent ok.
   >
     <View style={styles.clusterMarker}>
       <Text style={styles.clusterCount}>{cluster.properties.point_count}</Text>
@@ -91,29 +90,25 @@ const SouffleCluster = React.memo(({ cluster, onPress }: { cluster: any; onPress
 
 // Composant pour les marqueurs de souffle individuels
 const MemoizedSouffleMarker = React.memo(({ souffle, location, onPress }: { souffle: Souffle; location: any; onPress: (souffle: Souffle) => void }) => {
-  // Utilisation de useMemo pour stabiliser les calculs si souffle ou location ne changent pas.
+  // Stabiliser les calculs avec useMemo pour éviter les re-calculs inutiles lors des re-rendus.
   const canReveal = useMemo(() => isWithinRevealDistance(location.latitude, location.longitude, souffle.latitude, souffle.longitude), [location, souffle]);
   const sticker = useMemo(() => souffle.sticker ? getStickerById(souffle.sticker) : null, [souffle.sticker]);
   const background = useMemo(() => getBackgroundById(souffle.backgroundId), [souffle.backgroundId]);
   const isSquare = background?.shape === 'square';
 
-  // tracksViewChanges={!souffle.isRevealed && !canReveal}
-  // Permet de ne pas recalculer la vue du marqueur si le souffle n'est pas révélé ET n'est pas à portée.
-  // Une fois qu'il est révélable ou révélé, ou même s'il devient hors de portée,
-  // il faudra un re-rendu, donc `false` sur `tracksViewChanges` est plus risqué pour les marqueurs interactifs.
-  // On le retire pour s'assurer des mises à jour visuelles correctes pour `canReveal`.
   return (
     <Marker identifier={souffle.id} coordinate={souffle} onPress={() => onPress(souffle)}
-      // Laissez tracksViewChanges à sa valeur par défaut (true) pour les marqueurs interactifs
-      // afin que les changements d'état (canReveal, isRevealed) soient toujours reflétés.
-      // Si des problèmes de performance persistent, on peut envisager un contrôle plus fin.
+      // tracksViewChanges est laissé à la valeur par défaut (true) pour que les animations
+      // et les changements d'état (canReveal, isRevealed) soient correctement reflétés.
+      // Si un souffle n'est jamais censé changer d'apparence après un certain point,
+      // `tracksViewChanges={false}` serait une micro-optimisation.
     >
       <AnimatedHalo isActive={canReveal} canReveal={canReveal && !souffle.isRevealed} isRevealed={souffle.isRevealed}>
-        {/* WaveEffect est actif uniquement quand canReveal est true et le souffle n'est pas révélé. */}
         <WaveEffect isActive={canReveal && !souffle.isRevealed}>
+          {/* Utilisation de ImageBackground pour les images de fond.
+              S'assurer que les images réelles sont petites en taille de fichier et en résolution pour mobile. */}
           <ImageBackground
             source={background.source}
-            // Utiliser un style conditionnel pour éviter les bugs de borderRadius sur ImageBackground
             style={[
               styles.souffleMarkerBase,
               isSquare ? styles.souffleMarkerSquare : styles.souffleMarkerCircle,
@@ -138,7 +133,6 @@ const MemoizedSouffleMarker = React.memo(({ souffle, location, onPress }: { souf
 
 // Composant pour les marqueurs de tickets suspendus
 const MemoizedTicketMarker = React.memo(({ ticket, location, onPress }: { ticket: SuspendedTicket; location: any; onPress: (ticket: SuspendedTicket) => void }) => {
-  // useMemo pour stabiliser le calcul canReveal
   const canReveal = useMemo(() => isWithinRevealDistance(location.latitude, location.longitude, ticket.latitude, ticket.longitude), [location, ticket]);
 
   return (
@@ -171,10 +165,10 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
     locateMe: () => handleMapAction(DEFAULT_ZOOM),
     zoomIn: () => handleMapAction(zoomLevel + 1),
     zoomOut: () => handleMapAction(zoomLevel - 1),
-    toggleMapType: () => setMapType(current => (current === 'standard' ? 'satellite' : current === 'satellite' ? 'hybrid' : 'standard')), // Ajout de 'hybrid'
-    toggleSimulation: () => console.log('Toggle Simulation called'), // Placeholder, à implémenter
-    toggleTrails: () => console.log('Toggle Trails called'), // Placeholder, à implémenter
-    regenerateSimulation: () => console.log('Regenerate Simulation called'), // Placeholder, à implémenter
+    toggleMapType: () => setMapType(current => (current === 'standard' ? 'satellite' : current === 'satellite' ? 'hybrid' : 'standard')),
+    toggleSimulation: () => console.log('Toggle Simulation called'),
+    toggleTrails: () => console.log('Toggle Trails called'),
+    regenerateSimulation: () => console.log('Regenerate Simulation called'),
   }));
 
   // Anime la carte à une nouvelle région/zoom
@@ -185,7 +179,7 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
       const delta = calculateDelta(clampedZoom);
       internalMapRef.current.animateToRegion({ latitude: location.latitude, longitude: location.longitude, latitudeDelta: delta, longitudeDelta: delta }, 500);
     }
-  }, [location, zoomLevel]); // Ajout de zoomLevel aux dépendances pour s'assurer que sa valeur est à jour.
+  }, [location, zoomLevel]);
 
   // Gère le clic sur un cluster
   const handleClusterPress = useCallback((clusterId: string, children: any[]) => {
@@ -194,10 +188,9 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
     // Si un cluster est pressé, on zoome sur les marqueurs qu'il contient
     const coordinates = children.map(child => child.geometry.coordinates);
     if (coordinates.length > 0) {
+      // fitToSuppliedMarkers nécessite des identifiants stables pour les marqueurs
+      // Assurez-vous que vos marqueurs ont un `identifier` unique s'ils sont utilisés ici.
       internalMapRef.current.fitToSuppliedMarkers(
-        // Il est important que ces identifiants correspondent aux 'identifier' des Marker réels
-        // Si vos marqueurs n'ont pas d'identifiant stable basé sur les coordonnées,
-        // vous pourriez avoir besoin de créer une liste d'identifiants unique.
         coordinates.map((coord: { latitude: number, longitude: number }) => `souffle-${coord.latitude}-${coord.longitude}`), 
         { edgePadding: { top: 150, right: 100, bottom: 150, left: 100 }, animated: true }
       );
@@ -209,10 +202,8 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
     if (mode !== 'read' || !location) return;
     playInteractionSound('navigate');
     
-    // IMPORTANT : Créer une COPIE IMMUABLE du souffle
-    // Quand vous mettez à jour un souffle révélé, assurez-vous de ne pas muter l'objet original
-    // provenant du contexte, car cela pourrait empêcher React.memo de fonctionner correctement
-    // pour d'autres instances du marqueur si elles partagent des références.
+    // Récupérer l'état le plus récent du souffle depuis le contexte pour éviter les problèmes de stale closure.
+    // Cela garantit que isRevealed est toujours à jour.
     const currentSouffleState = souffles.find(s => s.id === souffle.id) || souffle;
 
     if (currentSouffleState.isRevealed) {
@@ -224,7 +215,7 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
     
     if (canReveal) {
       // Révélation directe
-      await revealSouffle(currentSouffleState.id); // Utilisez l'ID pour la mise à jour globale
+      await revealSouffle(currentSouffleState.id);
       onSouffleRevealed?.({ ...currentSouffleState, isRevealed: true }); // Notifie le parent avec l'état mis à jour
       setSelectedSouffle({ ...currentSouffleState, isRevealed: true }); // Met à jour le souffle pour l'affichage de la modale
     } else {
@@ -235,7 +226,7 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
       }
       
       const distance = Math.round(calculateDistance(location.latitude, location.longitude, currentSouffleState.latitude, currentSouffleState.longitude));
-      const ticketCount = user?.ticketCount || 0; // Utiliser optional chaining pour user
+      const ticketCount = user?.ticketCount || 0;
 
       Alert.alert(
         t('common.tooFarToRevealTitle'),
@@ -243,7 +234,7 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
         [
           { text: t('common.cancel'), style: 'cancel' },
           { 
-            text: t('common.useOneTicket'), 
+            text: t('common.useOneTicket'),
             onPress: async () => {
               if (ticketCount > 0) {
                 const ticketSpent = await spendTicket();
@@ -265,7 +256,7 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
         ]
       );
     }
-  }, [mode, location, isAuthenticated, user, t, revealSouffle, onSouffleRevealed, spendTicket, playInteractionSound, souffles]); // Ajout de souffles dans les dépendances.
+  }, [mode, location, isAuthenticated, user, t, revealSouffle, onSouffleRevealed, spendTicket, playInteractionSound, souffles]); // `souffles` en dépendance pour s'assurer que `currentSouffleState` est toujours à jour.
 
   // Gère le clic sur un marqueur de ticket suspendu
   const handleTicketPress = useCallback(async (ticket: SuspendedTicket) => {
@@ -280,7 +271,7 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
       [
         { text: t('common.cancel'), style: 'cancel' },
         {
-          text: t('shop.item_button_offer', { price: '0,99 €' }), // Ou un texte plus approprié comme "Réclamer"
+          text: t('shop.item_button_offer', { price: '0,99 €' }),
           onPress: async () => {
             const claimed = await claimSuspendedTicket(ticket.id);
             if (claimed) {
@@ -383,7 +374,8 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
         initialRegion={{ latitude: location.latitude, longitude: location.longitude, latitudeDelta: calculateDelta(DEFAULT_ZOOM), longitudeDelta: calculateDelta(DEFAULT_ZOOM) }}
         showsUserLocation
         mapType={mapType}
-        onRegionChangeComplete={(region: Region) => setZoomLevel(Math.log(360 / region.latitudeDelta) / Math.LN2)}
+        // Utiliser onRegionChangeComplete pour des mises à jour moins fréquentes du zoomLevel
+        onRegionChangeComplete={useCallback((region: Region) => setZoomLevel(Math.log(360 / region.latitudeDelta) / Math.LN2), [])}
         clusteringEnabled={true}
         renderCluster={(cluster: any) => <SouffleCluster cluster={cluster} onPress={handleClusterPress} />}
       >
@@ -413,6 +405,8 @@ const OptimizedMapView = forwardRef<MapViewActions, OptimizedMapViewProps>(({ mo
       </MapView>
 
       {/* Modale de révélation de souffle */}
+      {/* N'afficher la modale que si selectedSouffle n'est pas null, ce qui est déjà le cas.
+          Assurez-vous que le contenu de la modale est léger et n'effectue pas de calculs lourds. */}
       <Modal visible={!!selectedSouffle} transparent animationType="fade" onRequestClose={() => setSelectedSouffle(null)}>
         <TouchableOpacity 
           style={styles.modalOverlaySouffle}
