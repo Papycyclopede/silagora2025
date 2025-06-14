@@ -8,7 +8,7 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router } from 'expo-router'; // Assurez-vous que router est importé
 import { ArrowLeft, Mail, Phone, User } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -28,13 +28,12 @@ export default function CreateAccountScreen() {
       return;
     }
 
-    // Le pseudo est maintenant vraiment optionnel
     setIsLoading(true);
     
     const result = await createAccount({
       contact: contact.trim(),
       type: contactType,
-      pseudo: pseudo.trim() || undefined, // Optionnel
+      pseudo: pseudo.trim() || undefined,
     });
 
     setIsLoading(false);
@@ -50,7 +49,20 @@ export default function CreateAccountScreen() {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        {/* MODIFICATION ICI */}
+        <TouchableOpacity 
+          onPress={() => {
+            if (router.canGoBack()) { // Vérifie si il est possible de revenir en arrière
+              router.back(); //
+            } else {
+              // Si on ne peut pas revenir en arrière, on peut naviguer vers une page "sûre"
+              // comme l'écran de bienvenue, ou simplement ne rien faire.
+              // Pour la démo, on pourrait choisir de remplacer par l'écran de bienvenue.
+              router.replace('/(auth)/welcome'); //
+            }
+          }}
+          style={styles.backButton}
+        >
           <ArrowLeft size={22} color="#8B7355" />
         </TouchableOpacity>
         <View style={styles.titleContainer}>
