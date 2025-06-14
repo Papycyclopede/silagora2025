@@ -15,8 +15,7 @@ import {
   Linking,
   ViewStyle,
 } from 'react-native';
-// Note: Settings icône n'est pas importée ici mais utilisée dans les styles. Assurez-vous de l'importer si elle est manquante.
-import { CreditCard as Edit3, Eye, RefreshCw, ShoppingBag, Play, Eraser, Navigation, ZoomIn, ZoomOut, Layers, Pause, Waves, Gift, X, Settings } from 'lucide-react-native'; // Ajout de Settings ici
+import { CreditCard as Edit3, Eye, RefreshCw, ShoppingBag, Play, Eraser, Navigation, ZoomIn, ZoomOut, Layers, Pause, Waves, Gift, X, Settings } from 'lucide-react-native';
 import OptimizedMapView, { MapViewActions } from '@/components/OptimizedMapView';
 import SouffleModal from '@/components/SouffleModal';
 import PurchaseModal from '@/components/PurchaseModal';
@@ -61,7 +60,6 @@ export default function SouffleApp() {
 
   const mapViewRef = useRef<MapViewActions>(null);
 
-  // MODIFIÉ: Ajout de isLocationReady
   const { location, loading: locationLoading, error: locationError, requestLocation, permissionPermanentlyDenied, isLocationReady } = useLocation();
   const { souffles, loading: souffleLoading, refreshSouffles, clearSimulatedSouffles, suspendedTickets, claimSuspendedTicket, revealSouffle } = useSouffle();
   const { t } = useLanguage();
@@ -71,8 +69,8 @@ export default function SouffleApp() {
     settings: audioSettings,
     playInteractionSound,
     isAudioReady,
-    initAudio, // Note: initAudio ne fait rien dans AudioContext pour la démo
-    playAmbientSound, // Note: playAmbientSound ne fait rien dans AudioContext pour la démo
+    initAudio,
+    playAmbientSound,
   } = useAudio();
 
   const {
@@ -84,7 +82,6 @@ export default function SouffleApp() {
     showInfo
   } = useNotifications();
 
-  // Console log pour vérifier la disponibilité des fonctions de la carte
   useEffect(() => {
     if (mapViewRef.current) {
         console.log('index.tsx: mapViewRef.current a locateMe:', !!mapViewRef.current.locateMe);
@@ -98,11 +95,16 @@ export default function SouffleApp() {
     showMagic(t('souffleRevealedTitle'), t('souffleRevealedMessage'), { duration: 3000 });
   };
 
+  // MODIFIÉ: Renommé la fonction passée à OptimizedMapView pour éviter le conflit de nom.
+  // La prop s'appelle onSouffleRevealed, mais le callback local s'appelle onSouffleRevealedCallback.
+  const onSouffleRevealedCallback = useCallback((souffle: Souffle) => {
+    handleSouffleRevealed(souffle);
+  }, [handleSouffleRevealed]); // Dépend de handleSouffleRevealed
+
   const handleMarkerPress = useCallback(async (souffle: Souffle) => {
-    if (mode !== 'read' || !location) return; // S'assurer que 'location' est valide ici
+    if (mode !== 'read' || !location) return;
     playInteractionSound('navigate');
 
-    // Récupérer l'état le plus récent du souffle depuis le contexte pour éviter les problèmes de stale closure.
     const currentSouffleState = souffles.find(s => s.id === souffle.id) || souffle;
 
     if (currentSouffleState.isRevealed) {
@@ -114,7 +116,8 @@ export default function SouffleApp() {
 
     if (canReveal) {
       await revealSouffle(currentSouffleState.id);
-      onSouffleRevealed?.({ ...currentSouffleState, isRevealed: true });
+      // CORRECTION ICI: Appel de `onSouffleRevealedCallback` au lieu de `onSouffleRevealed`
+      onSouffleRevealedCallback({ ...currentSouffleState, isRevealed: true });
       setSelectedSouffle({ ...currentSouffleState, isRevealed: true });
     } else {
       if (!isAuthenticated) {
@@ -137,7 +140,8 @@ export default function SouffleApp() {
                 const ticketSpent = await spendTicket();
                 if (ticketSpent) {
                   await revealSouffle(currentSouffleState.id);
-                  handleSouffleRevealed({ ...currentSouffleState, isRevealed: true });
+                  // CORRECTION ICI: Appel de `onSouffleRevealedCallback` au lieu de `onSouffleRevealed`
+                  onSouffleRevealedCallback({ ...currentSouffleState, isRevealed: true });
                   Alert.alert(
                     t('common.souffleRevealed'),
                     t('common.ticketsRemaining', { count: (user?.ticketCount || 1) - 1 })
@@ -152,11 +156,8 @@ export default function SouffleApp() {
         ]
       );
     }
-  }, [mode, location, isAuthenticated, user, t, revealSouffle, onSouffleRevealed, spendTicket, playInteractionSound, souffles]);
+  }, [mode, location, isAuthenticated, user, t, revealSouffle, onSouffleRevealedCallback, spendTicket, playInteractionSound, souffles]);
 
-  const onSouffleRevealedCallback = useCallback((souffle: Souffle) => {
-    handleSouffleRevealed(souffle);
-  }, [handleSouffleRevealed]);
 
   const handleWriteMode = () => {
     if (!location) {
@@ -178,7 +179,6 @@ export default function SouffleApp() {
   };
 
   const handleRetryLocation = async () => {
-    // Si la permission est définitivement refusée, guider l'utilisateur vers les paramètres de l'OS.
     if (permissionPermanentlyDenied) {
       Alert.alert(
         t('locationPermissionDeniedTitle'),
@@ -191,12 +191,11 @@ export default function SouffleApp() {
       return;
     }
 
-    // Tenter de redemander la permission ou d'obtenir la position si elle n'est pas encore là
     try {
       showInfo(t('locating'), t('prepareContemplativeSpace'));
-      await requestLocation(); // Ceci va déclencher la pop-up de permission si nécessaire, ou chercher la position.
-      await refreshSouffles(); // Rafraîchir les souffles après avoir potentiellement une nouvelle position
-      if (location) { // Vérifier si la localisation est devenue disponible
+      await requestLocation();
+      await refreshSouffles();
+      if (location) {
         showSuccess(t('locationFound'), t('spaceReady'));
       } else {
         showError(t('locationErrorTitle'), t('locationErrorMessage'));
@@ -347,13 +346,13 @@ export default function SouffleApp() {
         </View>
 
         <View style={styles.mainContainer}>
-          {/* MODIFIÉ : Affiche OptimizedMapView si ses composants sont chargés, sinon l'overlay. */}
+          {/* Affiche OptimizedMapView si ses composants sont chargés, sinon l'overlay. */}
           {/* OptimizedMapView gère lui-même l'overlay si la localisation n'est pas là. */}
           <View style={styles.mapWrapper}>
             <OptimizedMapView
               ref={mapViewRef}
               mode={mode}
-              onSouffleRevealed={onSouffleRevealedCallback} // Utilisez la version useCallback ici
+              onSouffleRevealed={onSouffleRevealedCallback} // Utilisation du callback renommé
             />
           </View>
 
@@ -402,7 +401,7 @@ export default function SouffleApp() {
               disabled={!location} // Rendre le bouton réellement non cliquable si pas de localisation
             >
               <Edit3 size={16} color={'#5D4E37'} />
-              <Text style={[styles.buttonText, { color: '#5D4E37', fontSize: 16 }]}>{t('write')}</Text>
+              <Text style={styles.buttonText}>{t('write')}</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.statusIndicator}>
@@ -546,7 +545,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(139, 125, 107, 0.3)',
   },
   buttonText: {
-    fontSize: 10,
+    fontSize: 16, // Correction: Utilisation de la taille de police ici, car le style inline dans le composant est plus spécifique.
     fontFamily: 'Quicksand-Regular',
     marginTop: 4,
     letterSpacing: 0.3,
