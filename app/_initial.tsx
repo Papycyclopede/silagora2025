@@ -9,38 +9,38 @@ import { useLocation } from '@/contexts/LocationContext'; // Importez isLocation
 import { View, Text, StyleSheet, Animated, ImageBackground } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const HAS_LAUNCHED_KEY = '@silagora:has_launched'; //
+const HAS_LAUNCHED_KEY = '@silagora:has_launched';
 
 export default function AppInitializer() {
-  const { isLoading: isAuthLoading } = useAuth(); //
-  const { isSoundLoading, initAudio, settings: audioSettings } = useAudio(); //
+  const { isLoading: isAuthLoading } = useAuth();
+  const { isSoundLoading, initAudio, settings: audioSettings } = useAudio();
   const { loading: locationLoading, hasPermission: hasLocationPermission, isLocationReady } = useLocation(); // MODIFIÉ: Ajout de isLocationReady
 
-  const [hasCheckedFirstLaunch, setHasCheckedFirstLaunch] = useState(false); //
-  const [isFirstLaunch, setIsFirstLaunch] = useState(false); //
-  const [initializationStatus, setInitializationStatus] = useState("Démarrage..."); //
+  const [hasCheckedFirstLaunch, setHasCheckedFirstLaunch] = useState(false);
+  const [isFirstLaunch, setIsFirstLaunch] = useState(false);
+  const [initializationStatus, setInitializationStatus] = useState("Démarrage...");
 
-  const dot1Opacity = useRef(new Animated.Value(0.3)).current; //
-  const dot2Opacity = useRef(new Animated.Value(0.3)).current; //
-  const dot3Opacity = useRef(new Animated.Value(0.3)).current; //
+  const dot1Opacity = useRef(new Animated.Value(0.3)).current;
+  const dot2Opacity = useRef(new Animated.Value(0.3)).current;
+  const dot3Opacity = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
     const waveAnimation = (dot: Animated.Value) =>
       Animated.sequence([
-        Animated.timing(dot, { toValue: 1, duration: 500, useNativeDriver: true }), //
-        Animated.timing(dot, { toValue: 0.3, duration: 500, useNativeDriver: true }), //
+        Animated.timing(dot, { toValue: 1, duration: 500, useNativeDriver: true }),
+        Animated.timing(dot, { toValue: 0.3, duration: 500, useNativeDriver: true }),
       ]);
 
     const loop = Animated.loop(
       Animated.stagger(250, [
-        waveAnimation(dot1Opacity), //
-        waveAnimation(dot2Opacity), //
-        waveAnimation(dot3Opacity), //
+        waveAnimation(dot1Opacity),
+        waveAnimation(dot2Opacity),
+        waveAnimation(dot3Opacity),
       ])
     );
-    loop.start(); //
+    loop.start();
     
-    return () => loop.stop(); //
+    return () => loop.stop();
   }, []);
 
   useEffect(() => {
@@ -48,13 +48,13 @@ export default function AppInitializer() {
       // Étape 1: Vérifier si c'est le premier lancement (si non déjà fait)
       if (!hasCheckedFirstLaunch) {
         try {
-          const hasLaunched = await AsyncStorage.getItem(HAS_LAUNCHED_KEY); //
+          const hasLaunched = await AsyncStorage.getItem(HAS_LAUNCHED_KEY);
           if (hasLaunched === null) {
-            setIsFirstLaunch(true); //
-            await AsyncStorage.setItem(HAS_LAUNCHED_KEY, 'true'); //
+            setIsFirstLaunch(true);
+            await AsyncStorage.setItem(HAS_LAUNCHED_KEY, 'true');
             console.log("Premier lancement détecté. HAS_LAUNCHED_KEY a été défini.");
           } else {
-            setIsFirstLaunch(false); //
+            setIsFirstLaunch(false);
             console.log("Ce n'est pas le premier lancement.");
           }
         } catch (e) {
@@ -70,7 +70,7 @@ export default function AppInitializer() {
       if (isFirstLaunch) {
         setInitializationStatus("Préparation de l'expérience initiale...");
         console.log("Redirection vers /welcome (premier lancement)...");
-        router.replace('/(auth)/welcome'); //
+        router.replace('/(auth)/welcome');
         return;
       }
 
@@ -108,9 +108,9 @@ export default function AppInitializer() {
     hasCheckedFirstLaunch, 
     isFirstLaunch, 
     isAuthLoading, 
-    isSoundLoading, // Maintenu comme dépendance, mais sa valeur ne devrait pas bloquer si isAudioConsideredReady est true
-    locationLoading, // Maintenu comme dépendance, mais isLocationReady est prioritaire
-    hasLocationPermission, // Maintenu comme dépendance, mais isLocationReady est prioritaire
+    isSoundLoading, 
+    locationLoading, 
+    hasLocationPermission, 
     isLocationReady, // NOUVELLE DÉPENDANCE CLÉ
     audioSettings.enabled, 
     initAudio 
