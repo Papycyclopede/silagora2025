@@ -60,10 +60,11 @@ export default function SouffleApp() {
   
   const mapViewRef = useRef<MapViewActions>(null);
   
-  const { location, loading: locationLoading, error: locationError, requestLocation, permissionPermanentlyDenied } = useLocation();
-  const { stats, loading: souffleLoading, refreshSouffles, clearSimulatedSouffles, suspendedTickets, claimSuspendedTicket, revealSouffle } = useSouffle(); // Ajout de revealSouffle
+  // MODIFIÉ: Ajout de error et isLocationReady
+  const { location, loading: locationLoading, error: locationError, requestLocation, permissionPermanentlyDenied, isLocationReady } = useLocation();
+  const { stats, loading: souffleLoading, refreshSouffles, clearSimulatedSouffles, suspendedTickets, claimSuspendedTicket, revealSouffle } = useSouffle();
   const { t } = useLanguage(); 
-  const { user, spendTicket, isAuthenticated } = useAuth(); // Ajout de useAuth
+  const { user, spendTicket, isAuthenticated } = useAuth();
   
   const { 
     settings: audioSettings, 
@@ -82,6 +83,7 @@ export default function SouffleApp() {
     showInfo 
   } = useNotifications();
 
+  // Console log pour vérifier la disponibilité des fonctions de la carte
   useEffect(() => {
     if (mapViewRef.current) {
         console.log('index.tsx: mapViewRef.current a locateMe:', !!mapViewRef.current.locateMe);
@@ -95,29 +97,30 @@ export default function SouffleApp() {
     showMagic(t('souffleRevealedTitle'), t('souffleRevealedMessage'), { duration: 3000 });
   };
   
-  // CORRIGÉ : La fonction `handleMarkerPress` a été mise à jour pour utiliser les bonnes clés de traduction.
   const handleMarkerPress = useCallback(async (souffle: Souffle) => {
     if (mode !== 'read' || !location) return;
     playInteractionSound('navigate');
     
-    if (souffle.isRevealed) {
-      setSelectedSouffle(souffle);
+    // Assurez-vous d'utiliser l'état le plus récent du souffle
+    const currentSouffleState = souffle; // Pour cette fonction, 'souffle' est l'état le plus récent passé par le marqueur
+    
+    if (currentSouffleState.isRevealed) {
+      setSelectedSouffle(currentSouffleState);
       return;
     }
 
-    const canReveal = isWithinRevealDistance(location.latitude, location.longitude, souffle.latitude, souffle.longitude);
+    const canReveal = isWithinRevealDistance(location.latitude, location.longitude, currentSouffleState.latitude, currentSouffleState.longitude);
     
     if (canReveal) {
-      await revealSouffle(souffle.id);
-      onSouffleRevealed?.(souffle);
-      setSelectedSouffle({ ...souffle, isRevealed: true });
+      await revealSouffle(currentSouffleState.id);
+      handleSouffleRevealed({ ...currentSouffleState, isRevealed: true }); // Utilise la fonction unifiée et met à jour l'état
     } else {
       if (!isAuthenticated) {
         Alert.alert(t('common.functionalityReserved'), t('common.accountRequiredForDistantReveal'));
         return;
       }
       
-      const distance = Math.round(calculateDistance(location.latitude, location.longitude, souffle.latitude, souffle.longitude));
+      const distance = Math.round(calculateDistance(location.latitude, location.longitude, currentSouffleState.latitude, currentSouffleState.longitude));
       const ticketCount = user?.ticketCount || 0;
 
       Alert.alert(
@@ -126,13 +129,13 @@ export default function SouffleApp() {
         [
           { text: t('common.cancel'), style: 'cancel' },
           { 
-            text: t('common.useOneTicket'), 
+            text: t('common.useOneTicket'),
             onPress: async () => {
               if (ticketCount > 0) {
                 const ticketSpent = await spendTicket();
                 if (ticketSpent) {
-                  await revealSouffle(souffle.id);
-                  handleSouffleRevealed(souffle); // Utilise la fonction unifiée
+                  await revealSouffle(currentSouffleState.id);
+                  handleSouffleRevealed({ ...currentSouffleState, isRevealed: true }); // Utilise la fonction unifiée
                   Alert.alert(
                     t('common.souffleRevealed'),
                     t('common.ticketsRemaining', { count: (user?.ticketCount || 1) - 1 })
@@ -149,7 +152,7 @@ export default function SouffleApp() {
     }
   }, [mode, location, isAuthenticated, user, t, revealSouffle, spendTicket, playInteractionSound]);
   
-  const onSouffleRevealed = (souffle: Souffle) => {
+  const onSouffleRevealed = (souffle: Souffle) => { // Cette fonction est appelée par OptimizedMapView
     handleSouffleRevealed(souffle);
   };
 
@@ -157,8 +160,8 @@ export default function SouffleApp() {
     if (!location) {
       showError(t('locationRequired'), t('locationRequiredForDeposit'));
       Alert.alert(
-        t('locationRequired'), 
-        t('locationRequiredForDeposit'), 
+        t('locationRequired'),
+        t('locationRequiredForDeposit'),
         [{ text: t('later'), style: 'cancel' }, { text: t('activate'), onPress: requestLocation }]
       );
       return;
@@ -173,6 +176,7 @@ export default function SouffleApp() {
   };
 
   const handleRetryLocation = async () => {
+    // Si la permission est définitivement refusée, guider l'utilisateur vers les paramètres de l'OS.
     if (permissionPermanentlyDenied) {
       Alert.alert(
         t('locationPermissionDeniedTitle'),
@@ -185,11 +189,16 @@ export default function SouffleApp() {
       return;
     }
 
+    // Tenter de redemander la permission ou d'obtenir la position si elle n'est pas encore là
     try {
       showInfo(t('locating'), t('prepareContemplativeSpace'));
-      await requestLocation();
-      await refreshSouffles();
-      showSuccess(t('locationFound'), t('spaceReady'));
+      await requestLocation(); // Ceci va déclencher la pop-up de permission si nécessaire, ou chercher la position.
+      await refreshSouffles(); // Rafraîchir les souffles après avoir potentiellement une nouvelle position
+      if (location) { // Vérifier si la localisation est devenue disponible
+        showSuccess(t('locationFound'), t('spaceReady'));
+      } else {
+        showError(t('locationErrorTitle'), t('locationErrorMessage'));
+      }
     } catch (error) {
       console.error('Erreur lors de la relance de localisation:', error);
       showError(t('locationErrorTitle'), t('locationErrorMessage'));
@@ -217,7 +226,7 @@ export default function SouffleApp() {
       [
         { text: t('cancel'), style: 'cancel' },
         { 
-          text: t('clear'), 
+          text: t('clear'),
           style: 'destructive', 
           onPress: async () => {
             await clearSimulatedSouffles();
@@ -262,7 +271,7 @@ export default function SouffleApp() {
   const modalBackground = selectedSouffle ? getBackgroundById(selectedSouffle.backgroundId) : null;
   const showPremiumModal = modalBackground?.source && modalBackground?.shape === 'square';
 
-  const renderModalContent = () => {
+  const renderModalContent = useCallback(() => {
     const isPremium = !!(showPremiumModal && modalBackground?.source);
     return (
       <View style={[
@@ -311,7 +320,7 @@ export default function SouffleApp() {
         )}
       </View>
     );
-  };
+  }, [selectedSouffle, showPremiumModal, modalBackground, getTimeAgo, t]);
 
 
   return (
@@ -337,13 +346,34 @@ export default function SouffleApp() {
         </View>
 
         <View style={styles.mainContainer}>
-          <View style={styles.mapWrapper}>
-            <OptimizedMapView 
-              ref={mapViewRef} 
-              mode={mode} 
-              onSouffleRevealed={onSouffleRevealed} 
-            />
-          </View>
+          {/* MODIFIÉ : Affichage conditionnel de la carte ou du message d'état */}
+          {!isLocationReady || (locationLoading && !location) ? (
+            // Afficher un indicateur de chargement ou un message d'attente si la localisation n'est pas prête ou charge.
+            <View style={styles.mapUnavailableOverlay}>
+              <ActivityIndicator size="large" color="#A8C8E1" />
+              <Text style={styles.mapUnavailableText}>
+                {locationLoading ? t('locating') : t('locationRequiredToExplore')}
+              </Text>
+              {/* Ajout d'un bouton de réessai pour l'utilisateur en cas de besoin */}
+              {!locationLoading && isLocationReady && (
+                <TouchableOpacity style={styles.locationRetryButtonLarge} onPress={handleRetryLocation}>
+                    <RefreshCw size={18} color="#F9F7F4" />
+                    <Text style={styles.locationRetryButtonTextLarge}>{t('retry')}</Text>
+                </TouchableOpacity>
+              )}
+              {error && <Text style={styles.mapUnavailableErrorText}>{locationError}</Text>}
+            </View>
+          ) : (
+            // Si la localisation est prête (même si location est null) ET non en chargement, on affiche la carte.
+            // OptimizedMapView gérera son propre overlay si `location` est `null`.
+            <View style={styles.mapWrapper}>
+              <OptimizedMapView 
+                ref={mapViewRef} 
+                mode={mode} 
+                onSouffleRevealed={onSouffleRevealed} 
+              />
+            </View>
+          )}
           
           <View style={styles.controlBar}>
             <TouchableOpacity style={styles.controlButtonCircle} onPress={handleLocateMe}>
@@ -390,21 +420,25 @@ export default function SouffleApp() {
             <View style={styles.statusIconContainer}>
               <View style={[styles.breathingDot, audioSettings.enabled && audioSettings.contextualSounds && styles.breathingDotActive]} />
             </View>
+            {/* MODIFIÉ: Logique d'affichage du statut de localisation plus détaillée */}
             {location ? (
                 <Text style={styles.statusText}>
                     {mode === 'read' ? t('approachAura') : t('chooseLocation')}
                 </Text>
-            ) : locationLoading ? (
-                <Text style={styles.statusText}>{t('locating')}</Text>
-            ) : (
+            ) : locationLoading && isLocationReady ? ( // Si chargement mais déjà prêt, c'est qu'on attend une nouvelle position
+                 <Text style={styles.statusText}>{t('locating')}</Text>
+            ) : ( // Si pas de localisation et pas en chargement, c'est qu'il y a un problème ou pas de permission
                 <View style={styles.locationErrorSection}>
                     <Text style={styles.locationErrorText}>
                         {permissionPermanentlyDenied ? t('locationPermissionDeniedPermanent') : t('locationRequiredToExplore')}
                     </Text>
-                    <TouchableOpacity style={styles.locationRetryButton} onPress={handleRetryLocation}>
-                        <RefreshCw size={12} color="#8B7D6B" />
-                        <Text style={styles.locationRetryButtonText}>{t('retry')}</Text>
-                    </TouchableOpacity>
+                    {/* Le bouton de réessai est ici aussi pour les petites zones d'affichage */}
+                    {!locationLoading && isLocationReady && (
+                        <TouchableOpacity style={styles.locationRetryButton} onPress={handleRetryLocation}>
+                            <RefreshCw size={12} color="#8B7D6B" />
+                            <Text style={styles.locationRetryButtonText}>{t('retry')}</Text>
+                        </TouchableOpacity>
+                    )}
                 </View>
             )}
           </View>
@@ -531,6 +565,41 @@ const styles = StyleSheet.create({
   breathingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#A8C8E1', opacity: 0.6 },
   breathingDotActive: { opacity: 1, shadowColor: '#A8C8E1', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 4, elevation: 4 },
   statusText: { fontSize: 12, fontFamily: 'Quicksand-Regular', color: '#8B7D6B', textAlign: 'center', fontStyle: 'italic', letterSpacing: 0.3, flex: 1, lineHeight: 16 },
+  mapUnavailableOverlay: { // Styles pour l'overlay de carte non disponible
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F9F7F4', // Fond pour quand la carte n'est pas rendue
+    borderRadius: 20, // Pour matcher le mapWrapper
+    margin: 10,
+    marginRight: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 125, 107, 0.1)',
+    shadowColor: '#5D4E37', 
+    shadowOffset: { width: 0, height: 8 }, 
+    shadowOpacity: 0.06, 
+    shadowRadius: 20, 
+    elevation: 8,
+    padding: 20,
+  },
+  mapUnavailableText: { 
+    fontSize: 15, 
+    fontFamily: 'Georgia', 
+    color: '#8B7D6B', 
+    textAlign: 'center', 
+    fontStyle: 'italic', 
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  mapUnavailableErrorText: {
+    fontSize: 13,
+    fontFamily: 'Georgia',
+    color: '#C17B5C',
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginTop: 5,
+    lineHeight: 18,
+  },
   locationErrorSection: {
     flex: 1,
     alignItems: 'center',
@@ -562,6 +631,26 @@ const styles = StyleSheet.create({
     color: '#8B7D6B',
     marginLeft: 6,
   },
+  locationRetryButtonLarge: { // Nouveau style pour le gros bouton de réessai sur l'overlay
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#A8C8E1',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    marginTop: 20,
+    shadowColor: '#5D4E37',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  locationRetryButtonTextLarge: {
+    fontSize: 15,
+    fontFamily: 'Quicksand-Medium',
+    color: '#F9F7F4',
+    marginLeft: 8,
+  },
   errorContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(193, 123, 92, 0.08)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginTop: 8 },
   errorText: { fontSize: 9, fontFamily: 'Quicksand-Regular', color: '#C17B5C', flex: 1, marginRight: 8, fontStyle: 'italic' },
   retryButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(139, 125, 107, 0.1)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
@@ -582,51 +671,9 @@ const styles = StyleSheet.create({
   modalText: { fontSize: 13, fontFamily: 'Georgia', color: '#5D4E37', textAlign: 'center', lineHeight: 20, marginBottom: 16, fontStyle: 'italic' },
   modalSticker: { fontSize: 26, textAlign: 'center', marginBottom: 16 },
   modalTime: { fontSize: 11, fontFamily: 'Georgia', color: '#8B7D6B', textAlign: 'center', fontStyle: 'italic' },
-  modalTextContainerPremium: {
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-    shadowOpacity: 0,
-    padding: 0,
-  },
-  modalTitlePremium: {
-    fontSize: 21,
-    color: '#FFF',
-    textShadowColor: '#000B',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
-    textAlign: 'center',
-    marginBottom: 16,
-    fontWeight: 'bold',
-  },
-  modalEmotionTextPremium: {
-    fontSize: 18,
-    color: '#FFF',
-    fontWeight: '700',
-    textAlign: 'center',
-    textShadowColor: '#000B',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
-  },
-  modalTextPremium: {
-    fontSize: 26,
-    color: '#FFF',
-    fontWeight: '700',
-    textAlign: 'center',
-    lineHeight: 34,
-    textShadowColor: '#000B',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 7,
-    marginBottom: 16,
-  },
-  modalTimePremium: {
-    fontSize: 16,
-    color: '#FFF',
-    textAlign: 'center',
-    textShadowColor: '#000A',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
-    marginTop: 5,
-  },
-  echoPlaceMarker: { justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.7)', shadowColor: '#5D4E37', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4, },
-  echoPlaceIcon: { color: 'white', textShadowColor: 'rgba(0, 0, 0, 0.5)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 2 },
+  modalTextContainerPremium: { backgroundColor: 'transparent', borderWidth: 0, shadowOpacity: 0, padding: 0 },
+  modalTitlePremium: { fontSize: 21, color: '#FFF', textShadowColor: '#000B', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 6, textAlign: 'center', marginBottom: 16, fontWeight: 'bold' },
+  modalEmotionTextPremium: { fontSize: 18, color: '#FFF', fontWeight: '700', textAlign: 'center', textShadowColor: '#000B', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 6 },
+  modalTextPremium: { fontSize: 26, color: '#FFF', fontWeight: '700', textAlign: 'center', lineHeight: 34, textShadowColor: '#000B', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 7, marginBottom: 16 },
+  modalTimePremium: { fontSize: 16, color: '#FFF', textAlign: 'center', textShadowColor: '#000A', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 6, marginTop: 5 },
 });
