@@ -7,14 +7,14 @@ import {
   Dimensions,
   ScrollView,
   Modal,
-  Alert, // Ajout pour les alertes
+  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
-import { Wind, Heart, MapPin, Users, Crown, Volume2 } from 'lucide-react-native'; // Ajout de Volume2 pour l'icône audio
+import { Wind, Heart, MapPin, Users, Crown, Volume2 } from 'lucide-react-native';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { useLocation } from '@/contexts/LocationContext'; // Import du hook de localisation
-import { useAudio } from '@/contexts/AudioContext'; // Import du hook audio
-import AsyncStorage from '@react-native-async-storage/async-storage'; // Import de AsyncStorage
+import { useLocation } from '@/contexts/LocationContext';
+import { useAudio } from '@/contexts/AudioContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -25,27 +25,23 @@ const USER_LOCATION_PREFERENCE = '@silagora:user_location_preference'; // 'grant
 
 export default function WelcomeScreen() {
   const { t } = useLanguage();
-  const { requestLocation, hasPermission: hasLocationPermission, error: locationError } = useLocation(); // Utilise le hook de localisation
-  const { initAudio, settings: audioSettings, updateSettings } = useAudio(); // Utilise le hook audio
+  const { requestLocation, hasPermission: hasLocationPermission, error: locationError } = useLocation();
+  const { initAudio, settings: audioSettings, updateSettings } = useAudio();
 
   const [showLocationModal, setShowLocationModal] = useState(false);
-  const [showAudioModal, setShowAudioModal] = useState(false);
+  // const [showAudioModal, setShowAudioModal] = useState(false); // Supprimé : plus besoin de cette modale
   const [hasCheckedPreferences, setHasCheckedPreferences] = useState(false);
 
   useEffect(() => {
     const checkUserPreferences = async () => {
-      // Vérifie si l'utilisateur a déjà vu cet écran et fait ses choix
       const seenPermissionsScreen = await AsyncStorage.getItem(HAS_SEEN_PERMISSIONS_SCREEN);
       if (seenPermissionsScreen === 'true') {
-        // Si l'utilisateur a déjà vu l'écran, on le redirige directement
-        // Il gérera ses permissions via les paramètres de l'OS ou l'écran de la carte
         router.replace('/(tabs)');
         return;
       }
       
-      // Si c'est la première fois, on affiche la modale de localisation
       setHasCheckedPreferences(true);
-      setShowLocationModal(true);
+      setShowLocationModal(true); // Toujours commencer par la modale de localisation
     };
 
     checkUserPreferences();
@@ -54,10 +50,10 @@ export default function WelcomeScreen() {
   // --- Fonctions de gestion des permissions ---
 
   const handleLocationChoice = async (choice: 'activate' | 'later') => {
-    setShowLocationModal(false); // Ferme la modale de localisation
+    setShowLocationModal(false);
 
     if (choice === 'activate') {
-      await requestLocation(); // Demande la permission de localisation
+      await requestLocation();
       await AsyncStorage.setItem(USER_LOCATION_PREFERENCE, hasLocationPermission ? 'granted' : 'denied');
       if (hasLocationPermission) {
         Alert.alert(t('welcome.locationSuccessTitle'), t('welcome.locationSuccessMessage'));
@@ -68,23 +64,19 @@ export default function WelcomeScreen() {
       await AsyncStorage.setItem(USER_LOCATION_PREFERENCE, 'denied');
     }
 
-    // Après le choix de localisation, on passe à la modale audio
-    setShowAudioModal(true);
+    // Après le choix de localisation, on passe directement à la fin du flux sans modale audio
+    handleAudioChoice('continueWithout'); // Appelle directement la fonction pour "ignorer" l'audio
   };
 
   const handleAudioChoice = async (choice: 'activate' | 'continueWithout') => {
-    setShowAudioModal(false); // Ferme la modale audio
+    // setShowAudioModal(false); // Supprimé : plus besoin de cacher la modale
 
-    if (choice === 'activate') {
-      await updateSettings({ enabled: true, contextualSounds: true, spatialAudio: true }); // Active les sons
-      await initAudio(); // Initialise les sons
-      await AsyncStorage.setItem(USER_AUDIO_PREFERENCE, 'enabled');
-      Alert.alert(t('welcome.audioSuccessTitle'), t('welcome.audioSuccessMessage'));
-    } else {
-      await updateSettings({ enabled: false }); // Désactive les sons
-      await AsyncStorage.setItem(USER_AUDIO_PREFERENCE, 'disabled');
-      Alert.alert(t('welcome.audioDeniedTitle'), t('welcome.audioDeniedMessage'));
-    }
+    // Puisque l'audio est désactivé pour le moment, on met à jour les settings pour le désactiver
+    // et on marque la préférence de l'utilisateur comme "désactivée" même si c'était "activer".
+    await updateSettings({ enabled: false, contextualSounds: false, spatialAudio: false });
+    await AsyncStorage.setItem(USER_AUDIO_PREFERENCE, 'disabled');
+    // On ne montre plus d'alerte pour l'audio ici pour simplifier le flux de première utilisation.
+    // Alert.alert(t('welcome.audioDeniedTitle'), t('welcome.audioDeniedMessage'));
 
     // Marque que l'utilisateur a vu l'écran des permissions
     await AsyncStorage.setItem(HAS_SEEN_PERMISSIONS_SCREEN, 'true');
@@ -100,8 +92,8 @@ export default function WelcomeScreen() {
   const features = [
     {
       icon: <Wind size={24} color="#8B7355" />,
-      title: t('welcome.feature1.title'), // Traduction
-      description: t('welcome.feature1.description'), // Traduction
+      title: t('welcome.feature1.title'),
+      description: t('welcome.feature1.description'),
     },
     {
       icon: <MapPin size={24} color="#8B7355" />,
@@ -122,22 +114,22 @@ export default function WelcomeScreen() {
 
   return (
     <View style={styles.container}>
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Header poétique */}
-        <View style={styles.header}>
-          <Text style={styles.title}>Silagora</Text>
-          <Text style={styles.etymology}>
-            {t('about.etymology')} {/* Réutilise la traduction existante */}
-          </Text>
-          <View style={styles.decorativeLine} />
-          <Text style={styles.subtitle}>
-            {t('about.description')} {/* Réutilise la traduction existante */}
-          </Text>
-        </View>
+      {/* Header poétique */}
+      <View style={styles.header}>
+        <Text style={styles.title}>Silagora</Text>
+        <Text style={styles.etymology}>
+          {t('about.etymology')}
+        </Text>
+        <View style={styles.decorativeLine} />
+        <Text style={styles.subtitle}>
+          {t('about.description')}
+        </Text>
+      </View>
 
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Fonctionnalités */}
         <View style={styles.featuresSection}>
-          <Text style={styles.featuresTitle}>{t('welcome.featuresTitle')}</Text> {/* Traduction */}
+          <Text style={styles.featuresTitle}>{t('welcome.featuresTitle')}</Text>
           
           {features.map((feature, index) => (
             <View key={index} style={styles.featureCard}>
@@ -155,30 +147,30 @@ export default function WelcomeScreen() {
         {/* Citation inspirante */}
         <View style={styles.quoteSection}>
           <Text style={styles.quoteText}>
-            {t('about.quote.text')} {/* Réutilise la traduction existante */}
+            {t('about.quote.text')}
           </Text>
-          <Text style={styles.quoteAuthor}>— {t('about.quote.author')}</Text> {/* Réutilise la traduction existante */}
+          <Text style={styles.quoteAuthor}>— {t('about.quote.author')}</Text>
         </View>
 
         {/* Éthique */}
         <View style={styles.ethicsSection}>
-          <Text style={styles.ethicsTitle}>{t('about.ethics.title')}</Text> {/* Réutilise la traduction existante */}
+          <Text style={styles.ethicsTitle}>{t('about.ethics.title')}</Text>
           <View style={styles.ethicsGrid}>
             <View style={styles.ethicsItem}>
               <Text style={styles.ethicsEmoji}>🔒</Text>
-              <Text style={styles.ethicsText}>{t('about.ethics.point1Short')}</Text> {/* Nouvelle traduction plus courte */}
+              <Text style={styles.ethicsText}>{t('about.ethics.point1Short')}</Text>
             </View>
             <View style={styles.ethicsItem}>
               <Text style={styles.ethicsEmoji}>🌱</Text>
-              <Text style={styles.ethicsText}>{t('about.ethics.point5Short')}</Text> {/* Nouvelle traduction plus courte */}
+              <Text style={styles.ethicsText}>{t('about.ethics.point5Short')}</Text>
             </View>
             <View style={styles.ethicsItem}>
               <Text style={styles.ethicsEmoji}>💝</Text>
-              <Text style={styles.ethicsText}>{t('welcome.ethics3Text')}</Text> {/* Traduction */}
+              <Text style={styles.ethicsText}>{t('welcome.ethics3Text')}</Text>
             </View>
             <View style={styles.ethicsItem}>
               <Text style={styles.ethicsEmoji}>🤝</Text>
-              <Text style={styles.ethicsText}>{t('welcome.ethics4Text')}</Text> {/* Traduction */}
+              <Text style={styles.ethicsText}>{t('welcome.ethics4Text')}</Text>
             </View>
           </View>
         </View>
@@ -188,16 +180,16 @@ export default function WelcomeScreen() {
       <View style={styles.actionSection}>
         <TouchableOpacity
           style={styles.primaryButton}
-          onPress={() => router.push('/(auth)/create-account')} // Redirige vers la création de compte
+          onPress={() => router.push('/(auth)/create-account')}
         >
-          <Text style={styles.primaryButtonText}>{t('welcome.startButton')}</Text> {/* Traduction */}
+          <Text style={styles.primaryButtonText}>{t('welcome.startButton')}</Text>
         </TouchableOpacity>
         
         <TouchableOpacity
           style={styles.secondaryButton}
-          onPress={() => router.push('/(auth)/login')} // Redirige vers le login
+          onPress={() => router.push('/(auth)/login')}
         >
-          <Text style={styles.secondaryButtonText}>{t('welcome.alreadyAccountButton')}</Text> {/* Traduction */}
+          <Text style={styles.secondaryButtonText}>{t('welcome.alreadyAccountButton')}</Text>
         </TouchableOpacity>
 
         {/* Bouton d'accès maître discret */}
@@ -206,7 +198,7 @@ export default function WelcomeScreen() {
           onPress={() => router.push('/(auth)/master-login')}
         >
           <Crown size={16} color="#8B7355" />
-          <Text style={styles.masterButtonText}>{t('welcome.developerAccess')}</Text> {/* Traduction */}
+          <Text style={styles.masterButtonText}>{t('welcome.developerAccess')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -215,7 +207,7 @@ export default function WelcomeScreen() {
         visible={showLocationModal}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => handleLocationChoice('later')} // Gérer le retour arrière
+        onRequestClose={() => handleLocationChoice('later')}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -232,12 +224,12 @@ export default function WelcomeScreen() {
         </View>
       </Modal>
 
-      {/* Modal pour la demande audio */}
-      <Modal
+      {/* Supprimé : Modal pour la demande audio */}
+      {/* <Modal
         visible={showAudioModal}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => handleAudioChoice('continueWithout')} // Gérer le retour arrière
+        onRequestClose={() => handleAudioChoice('continueWithout')}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -252,7 +244,7 @@ export default function WelcomeScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      </Modal>
+      </Modal> */}
 
     </View>
   );
