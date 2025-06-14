@@ -15,7 +15,8 @@ import {
   Linking,
   ViewStyle,
 } from 'react-native';
-import { CreditCard as Edit3, Eye, RefreshCw, ShoppingBag, Play, Eraser, Navigation, ZoomIn, ZoomOut, Layers, Pause, Waves, Gift, X } from 'lucide-react-native';
+// Note: Settings icône n'est pas importée ici mais utilisée dans les styles. Assurez-vous de l'importer si elle est manquante.
+import { CreditCard as Edit3, Eye, RefreshCw, ShoppingBag, Play, Eraser, Navigation, ZoomIn, ZoomOut, Layers, Pause, Waves, Gift, X, Settings } from 'lucide-react-native'; // Ajout de Settings ici
 import OptimizedMapView, { MapViewActions } from '@/components/OptimizedMapView';
 import SouffleModal from '@/components/SouffleModal';
 import PurchaseModal from '@/components/PurchaseModal';
@@ -57,30 +58,30 @@ export default function SouffleApp() {
   const [showRevealAnimation, setShowRevealAnimation] = useState(false);
   const [selectedSouffle, setSelectedSouffle] = useState<Souffle | null>(null);
   const [mode, setMode] = useState<'read' | 'write'>('read');
-  
+
   const mapViewRef = useRef<MapViewActions>(null);
-  
-  // MODIFIÉ: Ajout de error et isLocationReady
+
+  // MODIFIÉ: Ajout de isLocationReady
   const { location, loading: locationLoading, error: locationError, requestLocation, permissionPermanentlyDenied, isLocationReady } = useLocation();
-  const { stats, loading: souffleLoading, refreshSouffles, clearSimulatedSouffles, suspendedTickets, claimSuspendedTicket, revealSouffle } = useSouffle();
-  const { t } = useLanguage(); 
+  const { souffles, loading: souffleLoading, refreshSouffles, clearSimulatedSouffles, suspendedTickets, claimSuspendedTicket, revealSouffle } = useSouffle();
+  const { t } = useLanguage();
   const { user, spendTicket, isAuthenticated } = useAuth();
-  
-  const { 
-    settings: audioSettings, 
+
+  const {
+    settings: audioSettings,
     playInteractionSound,
     isAudioReady,
-    initAudio,
-    playAmbientSound,
+    initAudio, // Note: initAudio ne fait rien dans AudioContext pour la démo
+    playAmbientSound, // Note: playAmbientSound ne fait rien dans AudioContext pour la démo
   } = useAudio();
-  
-  const { 
-    notifications, 
-    removeNotification, 
-    showSuccess, 
-    showError, 
+
+  const {
+    notifications,
+    removeNotification,
+    showSuccess,
+    showError,
     showMagic,
-    showInfo 
+    showInfo
   } = useNotifications();
 
   // Console log pour vérifier la disponibilité des fonctions de la carte
@@ -96,30 +97,31 @@ export default function SouffleApp() {
     setShowRevealAnimation(true);
     showMagic(t('souffleRevealedTitle'), t('souffleRevealedMessage'), { duration: 3000 });
   };
-  
+
   const handleMarkerPress = useCallback(async (souffle: Souffle) => {
-    if (mode !== 'read' || !location) return;
+    if (mode !== 'read' || !location) return; // S'assurer que 'location' est valide ici
     playInteractionSound('navigate');
-    
-    // Assurez-vous d'utiliser l'état le plus récent du souffle
-    const currentSouffleState = souffle; // Pour cette fonction, 'souffle' est l'état le plus récent passé par le marqueur
-    
+
+    // Récupérer l'état le plus récent du souffle depuis le contexte pour éviter les problèmes de stale closure.
+    const currentSouffleState = souffles.find(s => s.id === souffle.id) || souffle;
+
     if (currentSouffleState.isRevealed) {
       setSelectedSouffle(currentSouffleState);
       return;
     }
 
     const canReveal = isWithinRevealDistance(location.latitude, location.longitude, currentSouffleState.latitude, currentSouffleState.longitude);
-    
+
     if (canReveal) {
       await revealSouffle(currentSouffleState.id);
-      handleSouffleRevealed({ ...currentSouffleState, isRevealed: true }); // Utilise la fonction unifiée et met à jour l'état
+      onSouffleRevealed?.({ ...currentSouffleState, isRevealed: true });
+      setSelectedSouffle({ ...currentSouffleState, isRevealed: true });
     } else {
       if (!isAuthenticated) {
         Alert.alert(t('common.functionalityReserved'), t('common.accountRequiredForDistantReveal'));
         return;
       }
-      
+
       const distance = Math.round(calculateDistance(location.latitude, location.longitude, currentSouffleState.latitude, currentSouffleState.longitude));
       const ticketCount = user?.ticketCount || 0;
 
@@ -128,14 +130,14 @@ export default function SouffleApp() {
         t('common.tooFarToRevealMessage', { distance, ticketCount }),
         [
           { text: t('common.cancel'), style: 'cancel' },
-          { 
+          {
             text: t('common.useOneTicket'),
             onPress: async () => {
               if (ticketCount > 0) {
                 const ticketSpent = await spendTicket();
                 if (ticketSpent) {
                   await revealSouffle(currentSouffleState.id);
-                  handleSouffleRevealed({ ...currentSouffleState, isRevealed: true }); // Utilise la fonction unifiée
+                  handleSouffleRevealed({ ...currentSouffleState, isRevealed: true });
                   Alert.alert(
                     t('common.souffleRevealed'),
                     t('common.ticketsRemaining', { count: (user?.ticketCount || 1) - 1 })
@@ -144,17 +146,17 @@ export default function SouffleApp() {
               } else {
                 Alert.alert(t('common.ticketsExhausted'), t('common.visitShopForMoreTickets'));
               }
-            }, 
-            style: 'default' 
+            },
+            style: 'default'
           }
         ]
       );
     }
-  }, [mode, location, isAuthenticated, user, t, revealSouffle, spendTicket, playInteractionSound]);
-  
-  const onSouffleRevealed = (souffle: Souffle) => { // Cette fonction est appelée par OptimizedMapView
+  }, [mode, location, isAuthenticated, user, t, revealSouffle, onSouffleRevealed, spendTicket, playInteractionSound, souffles]);
+
+  const onSouffleRevealedCallback = useCallback((souffle: Souffle) => {
     handleSouffleRevealed(souffle);
-  };
+  }, [handleSouffleRevealed]);
 
   const handleWriteMode = () => {
     if (!location) {
@@ -217,7 +219,7 @@ export default function SouffleApp() {
       throw error;
     }
   };
-  
+
   const handleClearMap = () => {
     playInteractionSound('navigate');
     Alert.alert(
@@ -225,9 +227,9 @@ export default function SouffleApp() {
       t('clearSimulatedSoufflesMessage'),
       [
         { text: t('cancel'), style: 'cancel' },
-        { 
+        {
           text: t('clear'),
-          style: 'destructive', 
+          style: 'destructive',
           onPress: async () => {
             await clearSimulatedSouffles();
             showSuccess(t('mapCleared'), t('mapClearedMessage'));
@@ -236,7 +238,7 @@ export default function SouffleApp() {
       ]
     );
   };
-  
+
   const handleLocateMe = () => {
     mapViewRef.current?.locateMe();
   };
@@ -259,15 +261,15 @@ export default function SouffleApp() {
     mapViewRef.current?.regenerateSimulation();
   };
 
-  const getTimeAgo = (date: Date): string => { 
-    const diff = Date.now() - new Date(date).getTime(); 
-    const minutes = Math.floor(diff / 60000); 
+  const getTimeAgo = useCallback((date: Date): string => {
+    const diff = Date.now() - new Date(date).getTime();
+    const minutes = Math.floor(diff / 60000);
     if (minutes < 1) return t("justNow");
     if (minutes < 60) return t("minutesAgo", { count: minutes });
-    const hours = Math.floor(minutes / 60); 
+    const hours = Math.floor(minutes / 60);
     return t("hoursAgo", { count: hours });
-  };
-  
+  }, [t]);
+
   const modalBackground = selectedSouffle ? getBackgroundById(selectedSouffle.backgroundId) : null;
   const showPremiumModal = modalBackground?.source && modalBackground?.shape === 'square';
 
@@ -322,7 +324,6 @@ export default function SouffleApp() {
     );
   }, [selectedSouffle, showPremiumModal, modalBackground, getTimeAgo, t]);
 
-
   return (
     <ImageBackground source={require('../../assets/images/fond.png')} style={styles.backgroundImage}>
       <SafeAreaView style={styles.container}>
@@ -346,71 +347,59 @@ export default function SouffleApp() {
         </View>
 
         <View style={styles.mainContainer}>
-          {/* MODIFIÉ : Affichage conditionnel de la carte ou du message d'état */}
-          {!isLocationReady || (locationLoading && !location) ? (
-            // Afficher un indicateur de chargement ou un message d'attente si la localisation n'est pas prête ou charge.
-            <View style={styles.mapUnavailableOverlay}>
-              <ActivityIndicator size="large" color="#A8C8E1" />
-              <Text style={styles.mapUnavailableText}>
-                {locationLoading ? t('locating') : t('locationRequiredToExplore')}
-              </Text>
-              {/* Ajout d'un bouton de réessai pour l'utilisateur en cas de besoin */}
-              {!locationLoading && isLocationReady && (
-                <TouchableOpacity style={styles.locationRetryButtonLarge} onPress={handleRetryLocation}>
-                    <RefreshCw size={18} color="#F9F7F4" />
-                    <Text style={styles.locationRetryButtonTextLarge}>{t('retry')}</Text>
-                </TouchableOpacity>
-              )}
-              {error && <Text style={styles.mapUnavailableErrorText}>{locationError}</Text>}
-            </View>
-          ) : (
-            // Si la localisation est prête (même si location est null) ET non en chargement, on affiche la carte.
-            // OptimizedMapView gérera son propre overlay si `location` est `null`.
-            <View style={styles.mapWrapper}>
-              <OptimizedMapView 
-                ref={mapViewRef} 
-                mode={mode} 
-                onSouffleRevealed={onSouffleRevealed} 
-              />
-            </View>
-          )}
-          
-          <View style={styles.controlBar}>
-            <TouchableOpacity style={styles.controlButtonCircle} onPress={handleLocateMe}>
-                <Navigation size={20} color="#5D4E37" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.controlButtonCircle} onPress={handleZoomIn}>
-                <ZoomIn size={20} color="#5D4E37" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.controlButtonCircle} onPress={handleZoomOut}>
-                <ZoomOut size={20} color="#5D4E37" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.controlButtonCircle} onPress={handleToggleMapType}>
-                <Layers size={20} color="#5D4E37" />
-            </TouchableOpacity>
+          {/* MODIFIÉ : Affiche OptimizedMapView si ses composants sont chargés, sinon l'overlay. */}
+          {/* OptimizedMapView gère lui-même l'overlay si la localisation n'est pas là. */}
+          <View style={styles.mapWrapper}>
+            <OptimizedMapView
+              ref={mapViewRef}
+              mode={mode}
+              onSouffleRevealed={onSouffleRevealedCallback} // Utilisez la version useCallback ici
+            />
+          </View>
 
-            <View style={styles.separator} />
-            
-            <TouchableOpacity style={styles.controlButtonPinkSquare} onPress={handleToggleSimulation}>
-                <Play size={18} color="#4D3B2F" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.controlButtonPinkSquare} onPress={handleToggleTrails}>
-                <Waves size={18} color="#4D3B2F" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.controlButtonPinkSquare} onPress={handleRegenerateSimulation}>
-                <RefreshCw size={18} color="#4D3B2F" />
-            </TouchableOpacity>
+          <View style={styles.controlBar}>
+            {/* Les boutons de contrôle ne sont affichés que si la localisation est disponible. */}
+            {location && (
+              <>
+                <TouchableOpacity style={styles.controlButtonCircle} onPress={handleLocateMe}>
+                    <Navigation size={20} color="#5D4E37" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.controlButtonCircle} onPress={handleZoomIn}>
+                    <ZoomIn size={20} color="#5D4E37" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.controlButtonCircle} onPress={handleZoomOut}>
+                    <ZoomOut size={20} color="#5D4E37" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.controlButtonCircle} onPress={handleToggleMapType}>
+                    <Layers size={20} color="#5D4E37" />
+                </TouchableOpacity>
+
+                <View style={styles.separator} />
+
+                <TouchableOpacity style={styles.controlButtonPinkSquare} onPress={handleToggleSimulation}>
+                    <Play size={18} color="#4D3B2F" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.controlButtonPinkSquare} onPress={handleToggleTrails}>
+                    <Waves size={18} color="#4D3B2F" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.controlButtonPinkSquare} onPress={handleRegenerateSimulation}>
+                    <RefreshCw size={18} color="#4D3B2F" />
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </View>
-        
+
         <View style={styles.bottomBar}>
           <View style={styles.actionButtons}>
             <TouchableOpacity
               style={[
                 styles.actionButton,
-                styles.actionButtonActiveColor
+                styles.actionButtonActiveColor,
+                !location && styles.disabledButton // Désactiver le bouton "composer" si pas de localisation
               ]}
               onPress={handleWriteMode}
+              disabled={!location} // Rendre le bouton réellement non cliquable si pas de localisation
             >
               <Edit3 size={16} color={'#5D4E37'} />
               <Text style={[styles.buttonText, { color: '#5D4E37', fontSize: 16 }]}>{t('write')}</Text>
@@ -420,33 +409,32 @@ export default function SouffleApp() {
             <View style={styles.statusIconContainer}>
               <View style={[styles.breathingDot, audioSettings.enabled && audioSettings.contextualSounds && styles.breathingDotActive]} />
             </View>
-            {/* MODIFIÉ: Logique d'affichage du statut de localisation plus détaillée */}
+            {/* Logique d'affichage du statut de localisation plus détaillée */}
             {location ? (
                 <Text style={styles.statusText}>
                     {mode === 'read' ? t('approachAura') : t('chooseLocation')}
                 </Text>
-            ) : locationLoading && isLocationReady ? ( // Si chargement mais déjà prêt, c'est qu'on attend une nouvelle position
-                 <Text style={styles.statusText}>{t('locating')}</Text>
-            ) : ( // Si pas de localisation et pas en chargement, c'est qu'il y a un problème ou pas de permission
-                <View style={styles.locationErrorSection}>
+            ) : isLocationReady ? ( // Si isLocationReady est true mais pas de location
+                 <View style={styles.locationErrorSection}>
                     <Text style={styles.locationErrorText}>
-                        {permissionPermanentlyDenied ? t('locationPermissionDeniedPermanent') : t('locationRequiredToExplore')}
+                        {permissionPermanentlyDenied ? t('locationPermissionDeniedPermanent') : locationError || t('locationRequiredToExplore')}
                     </Text>
-                    {/* Le bouton de réessai est ici aussi pour les petites zones d'affichage */}
-                    {!locationLoading && isLocationReady && (
+                    {!locationLoading && !permissionPermanentlyDenied && (
                         <TouchableOpacity style={styles.locationRetryButton} onPress={handleRetryLocation}>
                             <RefreshCw size={12} color="#8B7D6B" />
                             <Text style={styles.locationRetryButtonText}>{t('retry')}</Text>
                         </TouchableOpacity>
                     )}
                 </View>
+            ) : ( // Si isLocationReady est false, on est encore en phase de démarrage du contexte de localisation
+                <Text style={styles.statusText}>{t('locating')}</Text>
             )}
           </View>
         </View>
-        
+
         <SouffleModal visible={showSouffleModal} onClose={handleSouffleModalClose} />
         <PurchaseModal visible={showPurchaseModal} onClose={() => { playInteractionSound('navigate'); setShowPurchaseModal(false); }} onPurchase={handlePurchase} />
-        
+
         <Modal visible={!!selectedSouffle} transparent animationType="fade" onRequestClose={() => setSelectedSouffle(null)}>
           <TouchableOpacity
             style={styles.modalOverlaySouffle}
@@ -492,11 +480,11 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(139, 125, 107, 0.1)',
-    shadowColor: '#5D4E37', 
-    shadowOffset: { width: 0, height: 8 }, 
-    shadowOpacity: 0.06, 
-    shadowRadius: 20, 
-    elevation: 8 
+    shadowColor: '#5D4E37',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.06,
+    shadowRadius: 20,
+    elevation: 8
   },
   controlBar: {
     width: 70,
@@ -528,78 +516,47 @@ const styles = StyleSheet.create({
     marginVertical: 6,
   },
   bottomBar: { backgroundColor: 'transparent', borderTopWidth: 1, borderTopColor: 'rgba(139, 125, 107, 0.08)', paddingHorizontal: 24, paddingBottom: Platform.OS === 'ios' ? 20 : 15, paddingTop: 15 },
-  actionButtons: { 
-    justifyContent: 'center', 
-    marginBottom: 15 
+  actionButtons: {
+    justifyContent: 'center',
+    marginBottom: 15
   },
-  actionButton: { 
-    paddingVertical: 12, 
-    paddingHorizontal: 18, 
-    borderRadius: 25, 
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    shadowColor: '#5D4E37', 
-    shadowOffset: { width: 0, height: 2 }, 
-    shadowOpacity: 0.05, 
-    shadowRadius: 10, 
-    elevation: 3, 
-    borderWidth: 0.5, 
+  actionButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 25,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#5D4E37',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    elevation: 3,
+    borderWidth: 0.5,
     borderColor: 'rgba(139, 125, 107, 0.08)',
-    width: '60%', 
-    alignSelf: 'center', 
+    width: '60%',
+    alignSelf: 'center',
   },
   actionButtonActiveColor: {
     backgroundColor: 'rgba(168, 200, 225, 0.8)',
     borderColor: 'rgba(168, 200, 225, 0.8)',
     shadowOpacity: 0.1,
   },
-  buttonText: { 
+  disabledButton: { // Style pour les boutons désactivés
+    opacity: 0.5,
+    backgroundColor: 'rgba(139, 125, 107, 0.3)',
+  },
+  buttonText: {
     fontSize: 10,
-    fontFamily: 'Quicksand-Regular', 
-    marginTop: 4, 
-    letterSpacing: 0.3, 
-    fontStyle: 'italic' 
+    fontFamily: 'Quicksand-Regular',
+    marginTop: 4,
+    letterSpacing: 0.3,
+    fontStyle: 'italic'
   },
   statusIndicator: { backgroundColor: 'rgba(255, 255, 255, 0.8)', paddingVertical: 14, paddingHorizontal: 20, borderRadius: 25, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', shadowColor: '#5D4E37', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.06, shadowRadius: 12, elevation: 3, borderWidth: 1, borderColor: 'rgba(139, 125, 107, 0.08)' },
   statusIconContainer: { marginRight: 12 },
   breathingDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#A8C8E1', opacity: 0.6 },
   breathingDotActive: { opacity: 1, shadowColor: '#A8C8E1', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 4, elevation: 4 },
   statusText: { fontSize: 12, fontFamily: 'Quicksand-Regular', color: '#8B7D6B', textAlign: 'center', fontStyle: 'italic', letterSpacing: 0.3, flex: 1, lineHeight: 16 },
-  mapUnavailableOverlay: { // Styles pour l'overlay de carte non disponible
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#F9F7F4', // Fond pour quand la carte n'est pas rendue
-    borderRadius: 20, // Pour matcher le mapWrapper
-    margin: 10,
-    marginRight: 5,
-    borderWidth: 1,
-    borderColor: 'rgba(139, 125, 107, 0.1)',
-    shadowColor: '#5D4E37', 
-    shadowOffset: { width: 0, height: 8 }, 
-    shadowOpacity: 0.06, 
-    shadowRadius: 20, 
-    elevation: 8,
-    padding: 20,
-  },
-  mapUnavailableText: { 
-    fontSize: 15, 
-    fontFamily: 'Georgia', 
-    color: '#8B7D6B', 
-    textAlign: 'center', 
-    fontStyle: 'italic', 
-    marginTop: 20,
-    marginBottom: 10,
-  },
-  mapUnavailableErrorText: {
-    fontSize: 13,
-    fontFamily: 'Georgia',
-    color: '#C17B5C',
-    textAlign: 'center',
-    fontStyle: 'italic',
-    marginTop: 5,
-    lineHeight: 18,
-  },
   locationErrorSection: {
     flex: 1,
     alignItems: 'center',
@@ -631,7 +588,7 @@ const styles = StyleSheet.create({
     color: '#8B7D6B',
     marginLeft: 6,
   },
-  locationRetryButtonLarge: { // Nouveau style pour le gros bouton de réessai sur l'overlay
+  locationRetryButtonLarge: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#A8C8E1',
@@ -650,6 +607,51 @@ const styles = StyleSheet.create({
     fontFamily: 'Quicksand-Medium',
     color: '#F9F7F4',
     marginLeft: 8,
+  },
+  locationOverlay: { // Overlay qui se superpose sur la carte si pas de localisation
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(249, 247, 244, 0.95)', // Un fond opaque par-dessus la carte si pas de localisation
+    zIndex: 4, // Juste en dessous du mapUnavailableOverlayContainer
+  },
+  locationLoadingOverlay: { // Overlay pour le chargement de la localisation
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(249, 247, 244, 0.95)',
+    zIndex: 4,
+  },
+  locationLoadingText: {
+    fontSize: 15,
+    fontFamily: 'Georgia',
+    color: '#8B7D6B',
+    textAlign: 'center',
+    fontStyle: 'italic',
+    marginTop: 10,
+  },
+  mapUnavailableOverlayContainer: { // Nouveau conteneur pour l'overlay de MapView indisponible (prend toute la place du MapWrapper)
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 20,
+    margin: 10,
+    marginRight: 5,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 125, 107, 0.1)',
+    shadowColor: '#5D4E37',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.06,
+    shadowRadius: 20,
+    elevation: 8,
+    overflow: 'hidden', // Pour que le borderRadius s'applique
+  },
+  mapUnavailableOverlay: { // Styles pour l'overlay de carte non disponible (prend toute la place du conteneur)
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F9F7F4',
+    padding: 20,
   },
   errorContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(193, 123, 92, 0.08)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, marginTop: 8 },
   errorText: { fontSize: 9, fontFamily: 'Quicksand-Regular', color: '#C17B5C', flex: 1, marginRight: 8, fontStyle: 'italic' },
@@ -671,9 +673,49 @@ const styles = StyleSheet.create({
   modalText: { fontSize: 13, fontFamily: 'Georgia', color: '#5D4E37', textAlign: 'center', lineHeight: 20, marginBottom: 16, fontStyle: 'italic' },
   modalSticker: { fontSize: 26, textAlign: 'center', marginBottom: 16 },
   modalTime: { fontSize: 11, fontFamily: 'Georgia', color: '#8B7D6B', textAlign: 'center', fontStyle: 'italic' },
-  modalTextContainerPremium: { backgroundColor: 'transparent', borderWidth: 0, shadowOpacity: 0, padding: 0 },
-  modalTitlePremium: { fontSize: 21, color: '#FFF', textShadowColor: '#000B', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 6, textAlign: 'center', marginBottom: 16, fontWeight: 'bold' },
-  modalEmotionTextPremium: { fontSize: 18, color: '#FFF', fontWeight: '700', textAlign: 'center', textShadowColor: '#000B', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 6 },
-  modalTextPremium: { fontSize: 26, color: '#FFF', fontWeight: '700', textAlign: 'center', lineHeight: 34, textShadowColor: '#000B', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 7, marginBottom: 16 },
-  modalTimePremium: { fontSize: 16, color: '#FFF', textAlign: 'center', textShadowColor: '#000A', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 6, marginTop: 5 },
+  modalTextContainerPremium: {
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    shadowOpacity: 0,
+    padding: 0,
+  },
+  modalTitlePremium: {
+    fontSize: 21,
+    color: '#FFF',
+    textShadowColor: '#000B',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
+    textAlign: 'center',
+    marginBottom: 16,
+    fontWeight: 'bold',
+  },
+  modalEmotionTextPremium: {
+    fontSize: 18,
+    color: '#FFF',
+    fontWeight: '700',
+    textAlign: 'center',
+    textShadowColor: '#000B',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
+  },
+  modalTextPremium: {
+    fontSize: 26,
+    color: '#FFF',
+    fontWeight: '700',
+    textAlign: 'center',
+    lineHeight: 34,
+    textShadowColor: '#000B',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 7,
+    marginBottom: 16,
+  },
+  modalTimePremium: {
+    fontSize: 16,
+    color: '#FFF',
+    textAlign: 'center',
+    textShadowColor: '#000A',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
+    marginTop: 5,
+  },
 });
