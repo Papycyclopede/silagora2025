@@ -12,8 +12,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const HAS_LAUNCHED_KEY = '@silagora:has_launched';
 
 export default function AppInitializer() {
-  const { isLoading: isAuthLoading } = useAuth();
-  const { isSoundLoading, initAudio, settings: audioSettings, updateSettings } = useAudio();
+  const { isLoading: isAuthLoading, isAuthenticated } = useAuth(); // Ajout de isAuthenticated
+  const { isSoundLoading, initAudio, settings: audioSettings } = useAudio(); // Retire updateSettings car non utilisé ici
   const { loading: locationLoading, requestLocation, hasPermission: hasLocationPermission } = useLocation();
 
   const [hasCheckedFirstLaunch, setHasCheckedFirstLaunch] = useState(false);
@@ -44,81 +44,69 @@ export default function AppInitializer() {
   }, []);
 
   useEffect(() => {
-    // TEMPORARY: FORCING REDIRECTION TO WELCOME SCREEN FOR TESTING
-    // THIS SECTION SHOULD BE REVERTED AFTER TESTING
+    const checkFirstLaunch = async () => {
+      try {
+        const hasLaunched = await AsyncStorage.getItem(HAS_LAUNCHED_KEY);
+        if (hasLaunched === null) {
+          setIsFirstLaunch(true);
+          // Marquez l'application comme lancée pour les prochaines fois
+          await AsyncStorage.setItem(HAS_LAUNCHED_KEY, 'true');
+        } else {
+          setIsFirstLaunch(false);
+        }
+      } catch (e) {
+        console.error("Failed to check first launch status:", e);
+        setIsFirstLaunch(false); // En cas d'erreur, ne pas traiter comme premier lancement
+      } finally {
+        setHasCheckedFirstLaunch(true);
+      }
+    };
+
     if (!hasCheckedFirstLaunch) {
-      const checkFirstLaunchAndForceRedirect = async () => {
-        // You might still want to mark it as launched for future real runs
-        // try {
-        //   const hasLaunched = await AsyncStorage.getItem(HAS_LAUNCHED_KEY);
-        //   if (hasLaunched === null) {
-        //     await AsyncStorage.setItem(HAS_LAUNCHED_KEY, 'true');
-        //   }
-        // } catch (e) {
-        //   console.error("Failed to set first launch status:", e);
-        // }
-        console.log("FORCING: Redirection vers /welcome pour les tests...");
-        router.replace('/(auth)/welcome');
-        setHasCheckedFirstLaunch(true); // Marque comme vérifié pour éviter des boucles d'effets
-      };
-      checkFirstLaunchAndForceRedirect();
-      return; // Stop further execution of this effect
+      checkFirstLaunch();
+      return; // Ne pas exécuter la suite de l'effet tant que le check initial n'est pas fait
     }
-    // END TEMPORARY FORCING
 
-    // ORIGINAL LOGIC (commented out for temporary forcing)
-    // if (!hasCheckedFirstLaunch) {
-    //   const checkFirstLaunch = async () => {
-    //     try {
-    //       const hasLaunched = await AsyncStorage.getItem(HAS_LAUNCHED_KEY);
-    //       if (hasLaunched === null) {
-    //         setIsFirstLaunch(true);
-    //         await AsyncStorage.setItem(HAS_LAUNCHED_KEY, 'true');
-    //       }
-    //     } catch (e) {
-    //       console.error("Failed to check first launch status:", e);
-    //       setIsFirstLaunch(false);
-    //     } finally {
-    //       setHasCheckedFirstLaunch(true);
-    //     }
-    //   };
-    //   checkFirstLaunch();
-    //   return;
-    // }
+    // Logique de redirection principale après la vérification du premier lancement
+    const initializeAndRedirect = async () => {
+      if (isFirstLaunch) {
+        console.log("Premier lancement détecté. Redirection vers /welcome...");
+        setInitializationStatus("Préparation de l'expérience initiale...");
+        router.replace('/(auth)/welcome'); // Redirige toujours vers l'écran d'accueil pour la démo
+        return;
+      }
 
-    // if (isFirstLaunch) {
-    //   console.log("Premier lancement détecté. Redirection vers /welcome...");
-    //   router.replace('/(auth)/welcome');
-    //   return;
-    // }
+      // Si ce n'est PAS le premier lancement
+      setInitializationStatus("Vérification de l'authentification...");
+      if (isAuthLoading) return; // Attendre que l'authentification soit chargée
 
-    // ORIGINAL LOGIC CONTINUED (commented out for temporary forcing)
-    // const initializeResources = async () => {
-    //   setInitializationStatus("Vérification de l'authentification...");
-    //   if (isAuthLoading) return;
-
-    //   setInitializationStatus("Vérification des permissions de localisation...");
-    //   if (!hasLocationPermission && !locationLoading) {
-    //     await requestLocation();
-    //   }
+      setInitializationStatus("Vérification des permissions de localisation...");
+      // Si la permission n'est pas acquise et qu'elle n'est pas en cours de chargement, la demander
+      // Note: Le LocationContext la demande déjà par défaut si non acquise et non bloquée.
+      if (!hasLocationPermission && !locationLoading) {
+        await requestLocation(); 
+      }
       
-    //   setInitializationStatus("Initialisation de l'audio...");
-    //   if (audioSettings.enabled && !isSoundLoading) {
-    //     await initAudio();
-    //   } else if (!audioSettings.enabled && !isSoundLoading) {
-    //     // Audio disabled, mark as ready
-    //   }
+      setInitializationStatus("Initialisation de l'audio...");
+      // Si l'audio est activé dans les settings et qu'il n'est pas encore prêt, l'initialiser
+      if (audioSettings.enabled && !isSoundLoading) {
+        await initAudio();
+      } else if (!audioSettings.enabled && !isSoundLoading) {
+        // L'audio est désactivé dans les paramètres, on considère qu'il est "prêt"
+      }
 
-    //   if (!isAuthLoading && !isSoundLoading && !locationLoading) {
-    //     console.log("Initialisation complète. Navigation vers /tabs...");
-    //     router.replace('/(tabs)');
-    //   } else {
-    //     console.log(`Statuts de chargement: Auth=${!isAuthLoading}, Audio=${!isSoundLoading}, Location=${!locationLoading}`);
-    //   }
-    // };
+      // Une fois toutes les ressources chargées et les checks faits
+      if (!isAuthLoading && !isSoundLoading && !locationLoading) { // Vérifier aussi isAuthenticated pour une navigation cohérente
+        console.log("Initialisation complète. Navigation vers /tabs...");
+        setInitializationStatus("Prêt pour l'envol !");
+        router.replace('/(tabs)');
+      } else {
+        console.log(`Statuts de chargement: Auth=${!isAuthLoading}, Audio=${!isSoundLoading}, Location=${!locationLoading}`);
+      }
+    };
 
-    // initializeResources();
-  }, [hasCheckedFirstLaunch]); // Only dependent on this flag for the temporary redirect
+    initializeAndRedirect();
+  }, [hasCheckedFirstLaunch, isFirstLaunch, isAuthLoading, isSoundLoading, locationLoading, hasLocationPermission, audioSettings.enabled, initAudio]);
 
 
   return (
